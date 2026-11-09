@@ -2,10 +2,19 @@
 # Версии ПО — строго по HLD §4. Параметры окружения — .env (образец .env.example); секреты — не в репозитории.
 name: kb
 
+# Ротация логов контейнеров (HLD §8.3: срок хранения и ротация — параметры окружения).
+# Лимит на контейнер: LOG_MAX_SIZE × LOG_MAX_FILE (по умолчанию 10 МБ × 3 файла = 30 МБ).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: ${LOG_MAX_SIZE:-10m}
+    max-file: "${LOG_MAX_FILE:-3}"
+
 services:
   postgres:
     image: postgres:18.6
     container_name: kb-postgres
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -29,6 +38,7 @@ services:
     # start --optimized); здоровье — mgmt-порт 9000 (внутренний).
     image: keycloak/keycloak:26.8.2-0
     container_name: kb-keycloak
+    logging: *default-logging
     command: ["start-dev", "--import-realm", "--health-enabled=true"]
     depends_on:
       postgres:
@@ -63,6 +73,7 @@ services:
   valkey:
     image: valkey/valkey:9.1.3-alpine
     container_name: kb-valkey
+    logging: *default-logging
     command: ["valkey-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     volumes:
       - valkeydata:/data
@@ -80,6 +91,7 @@ services:
   silo:
     image: pgsty/silo:RELEASE.2026-10-26T00-00-00Z
     container_name: kb-silo
+    logging: *default-logging
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${SILO_ROOT_USER}
@@ -115,6 +127,7 @@ services:
   gotenberg:
     image: gotenberg/gotenberg:9.2.0
     container_name: kb-gotenberg
+    logging: *default-logging
     healthcheck:
       # В образе Gotenberg нет wget/curl и /bin/sh — dash без /dev/tcp; проба через python3? —
       # тоже нет. Простейший корректный способ: bash недоступен, поэтому проверяем TCP из busybox?
@@ -131,6 +144,7 @@ services:
       context: ../backend
       dockerfile: Dockerfile
     container_name: kb-api
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -169,6 +183,7 @@ services:
       dockerfile: Dockerfile
     container_name: kb-worker
     command: ["python", "-m", "app.worker.main"]
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -203,6 +218,7 @@ services:
       context: ..
       dockerfile: deploy/nginx/Dockerfile
     container_name: kb-nginx
+    logging: *default-logging
     depends_on:
       api:
         condition: service_healthy
@@ -220,6 +236,7 @@ services:
   prometheus:
     image: prom/prometheus:v3.16.0
     container_name: kb-prometheus
+    logging: *default-logging
     depends_on:
       - api
       - worker
@@ -233,6 +250,7 @@ services:
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.18.0
     container_name: kb-postgres-exporter
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -247,6 +265,7 @@ services:
   node-exporter:
     image: prom/node-exporter:v1.10.2
     container_name: kb-node-exporter
+    logging: *default-logging
     command:
       - "--path.rootfs=/host"
     volumes:
@@ -261,6 +280,7 @@ services:
   alertmanager:
     image: prom/alertmanager:v0.29.0
     container_name: kb-alertmanager
+    logging: *default-logging
     volumes:
       - ./prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     ports:

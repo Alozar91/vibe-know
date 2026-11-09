@@ -7,17 +7,25 @@ import { useEffect, useState } from 'react'
 import { api, apiDownload, apiUpload, ApiError } from './auth'
 import {
   PDF_RU, SCAN_RU, STATUS_RU, fmtDate,
-  type FileState, type MaterialCard, type StatusLogEntry, type TransitionInfo,
-  type VersionDiff, type VersionInfo,
+  type CommentInfo, type DictionaryInfo, type FileState, type GroupNode,
+  type Material, type MaterialCard, type Page,
+  type StatusLogEntry, type TransitionInfo, type VersionDiff, type VersionInfo,
 } from './types'
+
+interface AttrLite {
+  id: string
+  name: string
+  dictionary_id?: string | null
+}
 
 interface Props {
   materialId: string
   onSaved: () => void
   onClosed: () => void
+  onOpenCard?: (materialId: string) => void // этап 7: переход по ссылкам мастер/подчинённые (FR-126)
 }
 
-export default function MaterialCardView({ materialId, onSaved, onClosed }: Props) {
+export default function MaterialCardView({ materialId, onSaved, onClosed, onOpenCard }: Props) {
   const [card, setCard] = useState<MaterialCard | null>(null)
   const [name, setName] = useState('')
   const [text, setText] = useState('')
@@ -192,6 +200,201 @@ export default function MaterialCardView({ materialId, onSaved, onClosed }: Prop
     }
   }
 
+  // ===== Этап 7: мастер-подчинённый, move/copy, комментарии =====
+
+  // Дерево групп + справочники для диалогов (FR-109: выбор среди видимых групп)
+  const [groups, setGroups] = useState<GroupNode[]>([])
+  const [langOptions, setLangOptions] = useState<{ id: string; value: string }[]>([])
+  const [comments, setComments] = useState<CommentInfo[]>([])
+  const [commentText, setCommentText] = useState('')
+  const [dialog, setDialog] = useState<null | 'child' | 'copy' | 'move' | 'master'>(null)
+  const [childKind, setChildKind] = useState<'adaptation' | 'translation'>('adaptation')
+  const [childLang, setChildLang] = useState('')
+  const [childName, setChildName] = useState('')
+  const [targetGroup, setTargetGroup] = useState('')
+  const [masterName, setMasterName] = useState('')
+  const [masterOptions, setMasterOptions] = useState<Material[]>([])
+
+  useEffect(() => {
+    if (card) {
+      api<GroupNode[]>('/groups').then(setGroups).catch(() => setGroups([]))
+      // Справочник атрибута «Язык» (FR-046): значения для диалога перевода
+      Promise.all([
+        api<DictionaryInfo[]>('/dictionaries').catch(() => []),
+        api<{ items?: AttrLite[] } | AttrLite[]>('/attributes').catch(() => []),
+      ]).then(([dicts, attrsRaw]) => {
+        const attrs: AttrLite[] = Array.isArray(attrsRaw) ? attrsRaw : (attrsRaw.items ?? [])
+        const lang = attrs.find((x) => x.name === 'Язык')
+        const d = lang?.dictionary_id ? dicts.find((x) => x.id === lang.dictionary_id) : undefined
+        setLangOptions(d?.value_items ?? [])
+      })
+    }
+  }, [card?.id])
+
+  useEffect(() => {
+    api<{ items: CommentInfo[] }>(`/materials/${materialId}/comments`)
+      .then((r) => setComments(r.items))
+      .catch(() => setComments([]))
+  }, [materialId, card?.version])
+
+  function flatGroups(nodes: GroupNode[], depth = 0): { g: GroupNode; depth: number }[] {
+    return nodes.flatMap((n) => [{ g: n, depth }, ...flatGroups(n.children ?? [], depth + 1)])
+  }
+
+  function openChildDialog() {
+    if (!card) return
+    setChildKind('adaptation')
+    setChildLang('')
+    setChildName(`${card.name} Адаптация`) // FR-035: имя по умолчанию
+    setTargetGroup('')
+    setDialog('child')
+  }
+
+  function openCopyDialog() {
+    if (!card) return
+    setChildName(`${card.name} Копия`) // FR-092
+    setTargetGroup('')
+    setDialog('copy')
+  }
+
+  function openMoveDialog() {
+    if (!card) return
+    setTargetGroup('')
+    setDialog('move')
+  }
+
+  async function openMasterDialog() {
+    if (!card) return
+    setMasterName('')
+    setMasterOptions([])
+    setDialog('master')
+  }
+
+  // Поиск кандидатов в новые мастера (FR-036: approved/published, видимые)
+  async function searchMasters(q: string) {
+    setMasterName(q)
+    if (q.trim().length < 2) { setMasterOptions([]); return }
+    try {
+      const r = await api<Page<Material>>(
+        `/materials?sort=name&order=asc&per_page=10&status=approved`, // + published отдельно
+      )
+      const r2 = await api<Page<Material>>(`/materials?sort=name&order=asc&per_page=10&status=published`)
+      const all = [...r.items, ...r2.items].filter(
+        (m) => m.id !== card?.id && m.name.toLowerCase().includes(q.trim().toLowerCase()),
+      )
+      setMasterOptions(all)
+    } catch {
+      setMasterOptions([])
+    }
+  }
+
+  async function createChild() {
+    if (!card || !targetGroup) return
+    setBusy(true)
+    setError('')
+    try {
+      const body: Record<string, unknown> = {
+        kind: childKind, group_id: targetGroup,
+      }
+      if (childName.trim() && childName.trim() !== defaultChildName()) body.name = childName.trim()
+      if (childKind === 'translation') body.language_id = childLang
+      await api(`/materials/${card.id}/children`, { method: 'POST', body: JSON.stringify(body) })
+      setDialog(null)
+      await load()
+      onSaved()
+    } catch (e) {
+      setError(e instanceof ApiError ? `${e.title}: ${e.detail ?? ''}` : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function defaultChildName(): string {
+    if (!card) return ''
+    return childKind === 'translation' ? `${card.name} (Перевод, …)` : `${card.name} Адаптация`
+  }
+
+  async function doCopy() {
+    if (!card || !targetGroup) return
+    setBusy(true)
+    setError('')
+    try {
+      await api(`/materials/${card.id}/copy`, {
+        method: 'POST', body: JSON.stringify({ group_id: targetGroup }),
+      })
+      setDialog(null)
+      onSaved()
+      // копия в другой группе — остаёмся в карточке исходника
+    } catch (e) {
+      setError(e instanceof ApiError ? `${e.title}: ${e.detail ?? ''}` : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function doMove() {
+    if (!card || !targetGroup) return
+    setBusy(true)
+    setError('')
+    try {
+      await api(`/materials/${card.id}/move`, {
+        method: 'POST', body: JSON.stringify({ group_id: targetGroup }),
+      })
+      setDialog(null)
+      await load()
+      onSaved()
+    } catch (e) {
+      setError(e instanceof ApiError ? `${e.title}: ${e.detail ?? ''}` : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function changeMaster(newMasterId: string) {
+    if (!card) return
+    setBusy(true)
+    setError('')
+    try {
+      await api(`/materials/${card.id}/master`, {
+        method: 'POST', body: JSON.stringify({ master_id: newMasterId }),
+      })
+      setDialog(null)
+      await load()
+      onSaved()
+    } catch (e) {
+      setError(e instanceof ApiError ? `${e.title}: ${e.detail ?? ''}` : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function detachMaster() {
+    if (!card || !window.confirm('Отвязать материал от мастера? Материал станет самостоятельным.')) return
+    setError('')
+    try {
+      await api(`/materials/${card.id}/master`, { method: 'DELETE' })
+      await load()
+      onSaved()
+    } catch (e) {
+      setError(e instanceof ApiError ? `${e.title}: ${e.detail ?? ''}` : String(e))
+    }
+  }
+
+  async function addComment() {
+    if (!card || !commentText.trim()) return
+    setError('')
+    try {
+      await api(`/materials/${card.id}/comments`, {
+        method: 'POST', body: JSON.stringify({ text: commentText }),
+      })
+      setCommentText('')
+      const r = await api<{ items: CommentInfo[] }>(`/materials/${card.id}/comments`)
+      setComments(r.items)
+    } catch (e) {
+      setError(e instanceof ApiError ? `${e.title}: ${e.detail ?? ''}` : String(e))
+    }
+  }
+
   // Этап 6: восстановление версии (US-042, FR-148)
   async function restore(n: number) {
     if (!card || !window.confirm(`Восстановить версию ${n}? Текущее содержимое будет заменено (создаётся новая версия).`)) return
@@ -235,6 +438,164 @@ export default function MaterialCardView({ materialId, onSaved, onClosed }: Prop
           <tr><td style={k}>Опубликован</td><td>{fmtDate(card.published_at)}</td></tr>
         </tbody>
       </table>
+
+      {/* Этап 7 (FR-126): ссылка на мастера или список подчинённых */}
+      <h3>Мастер / подчинённые</h3>
+      {card.master_id ? (
+        <p>
+          Мастер:{' '}
+          {card.master ? (
+            <a href="#" onClick={(e) => { e.preventDefault(); onOpenCard?.(card.master!.id) }}>
+              {card.master.name}
+            </a>
+          ) : card.master_id}{' '}
+          <small style={{ color: '#777' }}>({STATUS_RU[card.master?.status ?? card.status]})</small>
+          {p.edit && card.status !== 'archived' && (
+            <button onClick={detachMaster} style={{ marginLeft: 12 }}>Отвязать от мастера</button>
+          )}
+        </p>
+      ) : (
+        <p style={{ color: '#777' }}>Самостоятельный материал (мастера нет)</p>
+      )}
+      {card.children.length > 0 && (
+        <table style={{ borderCollapse: 'collapse', marginBottom: 8 }}>
+          <tbody>
+            {card.children.map((ch) => (
+              <tr key={ch.id}>
+                <td>
+                  <a href="#" onClick={(e) => { e.preventDefault(); onOpenCard?.(ch.id) }}>{ch.name}</a>
+                </td>
+                <td style={{ paddingLeft: 12, color: '#777' }}>{STATUS_RU[ch.status]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {card.children.length === 0 && !card.master_id && (
+        <p style={{ color: '#777' }}>Подчинённых нет</p>
+      )}
+      {p.create && (
+        <p>
+          <button onClick={openChildDialog}>Создать подчинённый материал</button>
+        </p>
+      )}
+      {p.copy && (
+        <button onClick={openCopyDialog} style={{ marginRight: 8 }}>Копировать</button>
+      )}
+      {p.move && card.children.length === 0 && card.status !== 'archived' && (
+        <button onClick={openMoveDialog} style={{ marginRight: 8 }}>Переместить</button>
+      )}
+      {p.edit && card.master_id && card.status !== 'archived' && (
+        <button onClick={openMasterDialog}>Сменить мастера</button>
+      )}
+
+      {/* Диалог этапа 7: создание подчинённого (US-024/025) */}
+      {dialog === 'child' && (
+        <div style={dialogBox}>
+          <h4>Создать подчинённый материал</h4>
+          <label>Вид<br />
+            <select value={childKind} onChange={(e) => {
+              const kind = e.target.value as 'adaptation' | 'translation'
+              setChildKind(kind)
+              setChildName(kind === 'translation' ? `${card!.name} (Перевод, …)` : `${card!.name} Адаптация`)
+            }}>
+              <option value="adaptation">Адаптация</option>
+              <option value="translation">Перевод</option>
+            </select>
+          </label><br /><br />
+          {childKind === 'translation' && (
+            <>
+              <label>Язык перевода (обязателен — US-025 A1)<br />
+                <select value={childLang} onChange={(e) => setChildLang(e.target.value)}>
+                  <option value="">— выберите язык —</option>
+                  {langOptions.map((v) => (
+                    <option key={v.id} value={v.id}>{v.value}</option>
+                  ))}
+                </select>
+              </label>{langOptions.length === 0 && (
+                <small style={{ color: '#b00' }}> Справочник «Язык» не заведён (СА: атрибуты → справочники)</small>
+              )}<br /><br />
+            </>
+          )}
+          <label>Имя (по умолчанию — FR-035)<br />
+            <input value={childName} onChange={(e) => setChildName(e.target.value)} style={{ width: 320 }} />
+          </label><br /><br />
+          <label>Целевая группа<br />
+            <select value={targetGroup} onChange={(e) => setTargetGroup(e.target.value)}>
+              <option value="">— выберите группу —</option>
+              {flatGroups(groups).map(({ g, depth }) => (
+                <option key={g.id} value={g.id}>{'  '.repeat(depth)}{g.name}</option>
+              ))}
+            </select>
+          </label><br /><br />
+          <button onClick={createChild} disabled={busy || !targetGroup || (childKind === 'translation' && !childLang.trim())}>
+            Создать
+          </button>{' '}
+          <button onClick={() => setDialog(null)}>Отмена</button>
+        </div>
+      )}
+
+      {/* Диалог: копирование (US-028) */}
+      {dialog === 'copy' && (
+        <div style={dialogBox}>
+          <h4>Копировать материал</h4>
+          <p style={{ color: '#777' }}>Имя копии: {childName} (счётчик при конфликте — FR-092)</p>
+          <label>Целевая группа<br />
+            <select value={targetGroup} onChange={(e) => setTargetGroup(e.target.value)}>
+              <option value="">— выберите группу —</option>
+              {flatGroups(groups).map(({ g, depth }) => (
+                <option key={g.id} value={g.id}>{'  '.repeat(depth)}{g.name}</option>
+              ))}
+            </select>
+          </label><br /><br />
+          <button onClick={doCopy} disabled={busy || !targetGroup}>Копировать</button>{' '}
+          <button onClick={() => setDialog(null)}>Отмена</button>
+        </div>
+      )}
+
+      {/* Диалог: перемещение (US-027) */}
+      {dialog === 'move' && (
+        <div style={dialogBox}>
+          <h4>Переместить материал</h4>
+          <p style={{ color: '#777' }}>
+            Требуется право «Перемещение» в обеих группах. При конфликте имени операция будет
+            отклонена — переименуйте материал вручную (FR-037).
+          </p>
+          <label>Целевая группа<br />
+            <select value={targetGroup} onChange={(e) => setTargetGroup(e.target.value)}>
+              <option value="">— выберите группу —</option>
+              {flatGroups(groups).map(({ g, depth }) => (
+                <option key={g.id} value={g.id}>{'  '.repeat(depth)}{g.name}</option>
+              ))}
+            </select>
+          </label><br /><br />
+          <button onClick={doMove} disabled={busy || !targetGroup}>Переместить</button>{' '}
+          <button onClick={() => setDialog(null)}>Отмена</button>
+        </div>
+      )}
+
+      {/* Диалог: смена мастера (US-026) */}
+      {dialog === 'master' && (
+        <div style={dialogBox}>
+          <h4>Сменить мастера</h4>
+          <p style={{ color: '#777' }}>
+            Новый мастер: «Утверждён»/«Публикация», без собственного мастера (FR-032/036).
+          </p>
+          <label>Поиск материала-мастера<br />
+            <input value={masterName} onChange={(e) => searchMasters(e.target.value)}
+                   placeholder="Начните вводить название" style={{ width: 320 }} />
+          </label>
+          <ul style={{ listStyle: 'none', padding: 0 }}>
+            {masterOptions.map((m) => (
+              <li key={m.id}>
+                <button onClick={() => changeMaster(m.id)} disabled={busy}>{m.name}</button>
+                <small style={{ color: '#777', marginLeft: 8 }}> {STATUS_RU[m.status]}</small>
+              </li>
+            ))}
+          </ul>
+          <button onClick={() => setDialog(null)}>Отмена</button>
+        </div>
+      )}
 
       {p.edit ? (
         editing ? (
@@ -414,11 +775,45 @@ export default function MaterialCardView({ materialId, onSaved, onClosed }: Prop
       <p style={{ color: '#777' }}>
         {Object.entries(p).filter(([, v]) => v).map(([k2]) => RUS[k2] ?? k2).join(', ') || 'только просмотр'}
       </p>
+
+      {/* Этап 7: комментарии (US-038, FR-096–098) */}
+      <h3>Комментарии</h3>
+      {comments.length === 0 && <p style={{ color: '#777' }}>Комментариев нет</p>}
+      <table style={{ borderCollapse: 'collapse', marginBottom: 8 }}>
+        <tbody>
+          {comments.map((c) => (
+            <tr key={c.id}>
+              <td style={k}>{fmtDate(c.created_at)}</td>
+              <td style={k}>{c.author_id.slice(0, 8)}…</td>
+              <td style={{ whiteSpace: 'pre-wrap' }}>{c.text}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {/* FR-098: добавляют участники процесса (автор + edit/review/publish);
+          право create в карте — не участника; проверка — на сервере */}
+      {(p.edit || p.review || p.publish || card.status === 'draft') && (
+        <div>
+          <textarea
+            value={commentText} onChange={(e) => setCommentText(e.target.value)}
+            rows={2} style={{ width: 480 }} placeholder="Новый комментарий…"
+          /><br />
+          <button onClick={addComment} disabled={!commentText.trim() || busy}>Добавить</button>
+          <small style={{ color: '#777', marginLeft: 8 }}>
+            Комментарии не редактируются и не удаляются (FR-096)
+          </small>
+        </div>
+      )}
     </div>
   )
 }
 
 const k: React.CSSProperties = { color: '#666', paddingRight: 16, verticalAlign: 'top', whiteSpace: 'nowrap' }
+
+const dialogBox: React.CSSProperties = {
+  border: '1px solid #ccc', borderRadius: 4, padding: '8px 16px',
+  maxWidth: 560, margin: '12px 0', background: '#fafafa',
+}
 
 const RUS: Record<string, string> = {
   view: 'Просмотр', create: 'Создание', edit: 'Редактирование', delete: 'Удаление',

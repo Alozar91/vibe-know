@@ -87,6 +87,7 @@ export default function App() {
             materialId={view.id}
             onSaved={() => setRefreshToken((x) => x + 1)}
             onClosed={() => setView({ kind: 'browser' })}
+            onOpenCard={(id) => setView({ kind: 'material', id })}
           />
           {/* US-044: управление правами — только СА (FR-105); компонент сам получит 403 у не-СА */}
           <PermissionsEditor objectType="material" objectId={view.id} />

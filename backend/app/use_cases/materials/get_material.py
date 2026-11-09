@@ -48,6 +48,14 @@ def get_material(db: Session, user, material_id: str) -> dict:
         .where(models.AttributeValue.material_id == m.id)
         .order_by(models.Attribute.display_order, models.Attribute.name)
     ).all()
+    # Резолв значений справочника в текст (FR-049, US-031): словарь id → значение
+    dv_ids = {av.dictionary_value_id for av, _a in rows if av.dictionary_value_id is not None}
+    dv_map = {}
+    if dv_ids:
+        dv_rows = db.execute(
+            select(models.DictionaryValue).where(models.DictionaryValue.id.in_(dv_ids))
+        ).scalars().all()
+        dv_map = {str(dv.id): dv.value for dv in dv_rows}
     for av, a in rows:
         orphan = str(a.id) not in bound_ids  # атрибут исключён из типа (FR-051)
         field = _VALUE_FIELDS[
@@ -55,6 +63,9 @@ def get_material(db: Session, user, material_id: str) -> dict:
         ]
         val = getattr(av, field)
         if val is not None:
+            # dictionary-значение отдаётся текстом (значение справочника)
+            if field == "dictionary_value_id":
+                val = dv_map.get(str(val), str(val))
             entry = next((x for x in attrs_out if x["attribute_id"] == str(a.id)), None)
             if entry is None:
                 entry = {
@@ -76,8 +87,33 @@ def get_material(db: Session, user, material_id: str) -> dict:
         select(models.MaterialTag.tag_id).where(models.MaterialTag.material_id == m.id)
     ).scalars()]
 
-    return to_card(m, effective_permissions(db, user, m.id)) | {
+    out = to_card(m, effective_permissions(db, user, m.id)) | {
         "type_name": t.name,
         "attributes": attrs_out,
         "tag_ids": tag_ids,
     }
+
+    # FR-126 (4.3): ссылка на мастера или список подчинённых
+    out["master_id"] = str(m.master_id) if m.master_id else None
+    out["master"] = None
+    if m.master_id is not None:
+        master = db.execute(
+            select(models.Material).where(models.Material.id == m.master_id)
+        ).scalar_one_or_none()
+        if master is not None and not master.is_deleted:
+            out["master"] = {
+                "id": str(master.id), "name": master.name,
+                "status": master.status.value if hasattr(master.status, "value") else str(master.status),
+            }
+    children = db.execute(
+        select(models.Material)
+        .where(models.Material.master_id == m.id, models.Material.is_deleted.is_(False))
+        .order_by(models.Material.updated_at.desc())
+    ).scalars().all()
+    out["children"] = [
+        {"id": str(ch.id), "name": ch.name,
+         "status": ch.status.value if hasattr(ch.status, "value") else str(ch.status),
+         "group_id": str(ch.group_id)}
+        for ch in children
+    ]
+    return out

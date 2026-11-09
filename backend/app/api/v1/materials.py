@@ -147,3 +147,108 @@ async def delete_material_ep(
 
     result = delete_material(db, user, material_id, if_match)
     return Response(status_code=204, headers={"ETag": f'"{result["version"]}"'})
+
+
+# ==========================================================================
+# Этап 7: мастер-подчинённый (LLD §12.3; US-024–028, US-038)
+# ==========================================================================
+
+class ChildIn(BaseModel):
+    kind: str  # adaptation | translation (FR-034)
+    group_id: str
+    name: str | None = Field(default=None, min_length=1)
+    language_id: str | None = None  # для kind=translation (16.1-115)
+
+
+class MasterIn(BaseModel):
+    master_id: str
+
+
+class MoveIn(BaseModel):
+    group_id: str
+
+
+class CopyIn(BaseModel):
+    group_id: str
+
+
+class CommentIn(BaseModel):
+    text: str = Field(min_length=1)
+
+
+@router.post("/materials/{material_id}/children", status_code=201)
+async def create_child_ep(
+    user: CurrentUserDep, material_id: str, body: ChildIn,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Создание подчинённого — адаптация/перевод (FR-033–035; US-024/025)."""
+    from app.use_cases.materials.create_child import create_child_material
+
+    return create_child_material(
+        db, user, material_id, body.kind, body.group_id,
+        name=body.name, language_id=body.language_id,
+    )
+
+
+@router.post("/materials/{material_id}/master")
+async def change_master_ep(
+    user: CurrentUserDep, material_id: str, body: MasterIn,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Смена мастера (FR-032/036; US-026); уведомление не создаётся (16.1-111)."""
+    from app.use_cases.materials.master_change import change_master
+
+    return change_master(db, user, material_id, body.master_id)
+
+
+@router.delete("/materials/{material_id}/master")
+async def detach_master_ep(
+    user: CurrentUserDep, material_id: str, db: Session = Depends(get_db),
+) -> dict:
+    """Отвязка от мастера (FR-036; US-026 п.5); 16.1-111 — без события."""
+    from app.use_cases.materials.master_change import detach_master
+
+    return detach_master(db, user, material_id)
+
+
+@router.post("/materials/{material_id}/move")
+async def move_material_ep(
+    user: CurrentUserDep, material_id: str, body: MoveIn,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Перемещение между группами (FR-037; US-027); конфликт имени — 409."""
+    from app.use_cases.materials.move_material import move_material
+
+    return move_material(db, user, material_id, body.group_id)
+
+
+@router.post("/materials/{material_id}/copy", status_code=201)
+async def copy_material_ep(
+    user: CurrentUserDep, material_id: str, body: CopyIn,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Копирование (FR-092, 7.10; US-028) — черновик «<имя> Копия»."""
+    from app.use_cases.materials.copy_material import copy_material
+
+    return copy_material(db, user, material_id, body.group_id)
+
+
+@router.get("/materials/{material_id}/comments")
+async def list_comments_ep(
+    user: CurrentUserDep, material_id: str, db: Session = Depends(get_db),
+) -> dict:
+    """Комментарии (FR-096/097; US-038): чтение — видимость материала."""
+    from app.use_cases.materials.comments import list_comments
+
+    return list_comments(db, user, material_id)
+
+
+@router.post("/materials/{material_id}/comments", status_code=201)
+async def add_comment_ep(
+    user: CurrentUserDep, material_id: str, body: CommentIn,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Новый комментарий (FR-098; US-038): участники процесса; аудит."""
+    from app.use_cases.materials.comments import add_comment
+
+    return add_comment(db, user, material_id, body.text)

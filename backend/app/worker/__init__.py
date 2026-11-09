@@ -31,6 +31,17 @@ def make_celery() -> Celery:
                 "task": "notifications.digest",
                 "schedule": 3600.0,
             },
+            # Этап 10 (LLD §9)
+            "keycloak-sync": {
+                "task": "keycloak.sync",
+                "schedule": 300.0,  # 5 мин (16.1-118); интервал — system_settings
+            },
+            "maintenance-daily": {
+                # audit_cleanup / inapp_cleanup / cas_gc — ежедневные (§9);
+                # один якорный запуск в сутки + внутренние условия
+                "task": "maintenance.daily",
+                "schedule": 86400.0,
+            },
         },
     )
     return app

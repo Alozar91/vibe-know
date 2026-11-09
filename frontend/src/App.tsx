@@ -12,8 +12,11 @@ import SearchView from './SearchView'
 import SearchAnalytics from './SearchAnalytics'
 import NotificationBell, { useUnreadCount } from './NotificationBell'
 import NotificationTriggers from './NotificationTriggers'
+import AuditLog from './AuditLog'
+import SystemSettings from './SystemSettings'
+import ServiceDesk from './ServiceDesk'
 
-type View = { kind: 'browser' } | { kind: 'sections' } | { kind: 'matrix' } | { kind: 'search'; q: string } | { kind: 'analytics' } | { kind: 'material'; id: string } | { kind: 'triggers' }
+type View = { kind: 'browser' } | { kind: 'sections' } | { kind: 'matrix' } | { kind: 'search'; q: string } | { kind: 'analytics' } | { kind: 'material'; id: string } | { kind: 'triggers' } | { kind: 'audit' } | { kind: 'settings' } | { kind: 'service' }
 
 export default function App() {
   const [ready, setReady] = useState(false)
@@ -107,6 +110,24 @@ export default function App() {
             Настройка уведомлений
           </button>
         )}
+        {me?.is_super && (
+          <button onClick={() => setView({ kind: 'audit' })}
+                  style={view.kind === 'audit' ? activeNav : {}}>
+            Журнал аудита
+          </button>
+        )}
+        {me?.is_super && (
+          <button onClick={() => setView({ kind: 'settings' })}
+                  style={view.kind === 'settings' ? activeNav : {}}>
+            Параметры системы
+          </button>
+        )}
+        {me?.is_super && (
+          <button onClick={() => setView({ kind: 'service' })}
+                  style={view.kind === 'service' ? activeNav : {}}>
+            Служебный раздел
+          </button>
+        )}
       </nav>
 
       {view.kind === 'browser' && (
@@ -118,6 +139,9 @@ export default function App() {
       {view.kind === 'matrix' && <TransitionMatrix />}
       {view.kind === 'analytics' && <SearchAnalytics />}
       {view.kind === 'triggers' && <NotificationTriggers />}
+      {view.kind === 'audit' && <AuditLog />}
+      {view.kind === 'settings' && <SystemSettings />}
+      {view.kind === 'service' && <ServiceDesk />}
       {view.kind === 'search' && (
         <SearchView initialQuery={view.q} onOpenMaterial={(id) => setView({ kind: 'material', id })} />
       )}

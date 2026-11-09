@@ -62,7 +62,18 @@ def search_materials(
         raise DomainError(status=400, code="VALIDATION_ERROR", title="Ошибка валидации запроса",
                           detail=f"Длина запроса ограничена {MAX_Q_LEN} символами")
     page = max(1, int(page or 1))
-    per_page = min(200, max(1, int(per_page or 50)))
+    if per_page:
+        per_page = min(200, max(1, int(per_page)))
+    else:
+        # параметр page_size (FR-121, US-048)
+        per_page = 50
+        try:
+            from app.use_cases.admin.settings import get_settings_value
+
+            per_page = int(get_settings_value(db, "page_size", 50) or 50)
+        except Exception:
+            pass
+        per_page = min(200, max(1, per_page))
     is_pg = _is_pg(db)
 
     M = models.Material
@@ -373,13 +384,8 @@ def _sort_field(sort: str):
 
 
 def _setting(db: Session, key: str, default):
-    """Чтение параметра реестра §2.5 (system_settings; NFR-020)."""
-    row = db.execute(
-        select(models.SystemSetting).where(models.SystemSetting.key == key)
-    ).scalar_one_or_none()
-    if row is None:
-        return default
-    try:
-        return json.loads(row.value)
-    except Exception:
-        return default
+    """Чтение параметра реестра §2.5 (system_settings; NFR-020).
+    Значение JSONB декодировано SQLAlchemy — json.loads не нужен."""
+    from app.use_cases.admin.settings import get_settings_value
+
+    return get_settings_value(db, key, default)

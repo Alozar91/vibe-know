@@ -5,10 +5,11 @@ from sqlalchemy.orm import Session
 from app.db import models
 from app.use_cases.common import get_role_or_404, get_user_or_404, require_super
 from app.use_cases.errors import not_found
+from app.use_cases.lifecycle.audit import audit_log
 from app.use_cases.permissions.cache import commit_rights
 
 
-def revoke_role(db: Session, is_super: bool, user_id: str, role_id: str) -> None:
+def revoke_role(db: Session, is_super: bool, user_id: str, role_id: str, actor=None) -> None:
     require_super(is_super)
     target = get_user_or_404(db, user_id)
     role = get_role_or_404(db, role_id)
@@ -20,4 +21,8 @@ def revoke_role(db: Session, is_super: bool, user_id: str, role_id: str) -> None
     if link is None:
         raise not_found("Роль не назначена")
     db.delete(link)
+    # US-049 ш.1 (FR-140, LLD §11 user.role_revoke)
+    if actor is not None:
+        audit_log(db, actor, "user.role_revoke", "user", target.id,
+                  details={"role": role.name})
     commit_rights(db)

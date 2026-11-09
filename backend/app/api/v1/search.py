@@ -31,7 +31,7 @@ async def search_ep(
     sort: str = "relevance",
     order: str = "desc",
     page: int = 1,
-    per_page: int = 50,
+    per_page: int | None = None,
     # Атрибутные фильтры — JSON-строка (GET-совместимо; FR-116):
     # [{"attribute_id":"…","op":"eq|substring|range|any_of","value":…,…}]
     attribute_filters: str | None = None,

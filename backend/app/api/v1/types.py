@@ -33,7 +33,9 @@ async def list_types_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> 
 @router.post("/types", status_code=201)
 async def create_type_ep(user: CurrentUserDep, body: TypeIn, db: Session = Depends(get_db)) -> dict:
     """Создание типа (FR-043, US-030 шаг 2) — СА."""
-    return create_type(db, user.is_super, body.name, body.attribute_ids)
+    from app.use_cases.types.create_type import create_type as uc
+
+    return uc(db, user.is_super, body.name, body.attribute_ids, actor=user)
 
 
 @router.patch("/types/{type_id}")
@@ -41,13 +43,17 @@ async def rename_type_ep(
     user: CurrentUserDep, type_id: str, body: TypePatch, db: Session = Depends(get_db)
 ) -> dict:
     """Переименование типа (FR-043) — СА."""
-    return rename_type(db, user.is_super, type_id, body.name)
+    from app.use_cases.types.rename_type import rename_type as uc
+
+    return uc(db, user.is_super, type_id, body.name, actor=user)
 
 
 @router.delete("/types/{type_id}", status_code=204)
 async def delete_type_ep(user: CurrentUserDep, type_id: str, db: Session = Depends(get_db)) -> None:
     """Удаление типа (FR-050) — СА; запрет при использовании."""
-    delete_type(db, user.is_super, type_id)
+    from app.use_cases.types.delete_type import delete_type as uc
+
+    uc(db, user.is_super, type_id, actor=user)
 
 
 @router.post("/types/{type_id}/attributes/{attribute_id}", status_code=204)

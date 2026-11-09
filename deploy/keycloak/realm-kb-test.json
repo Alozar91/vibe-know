@@ -59,6 +59,16 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
       "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "service_account",
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "basic",
+        "email",
+        "kc-admin-api"
+      ],
       "protocolMappers": [
         {
           "name": "audience-kb-api",
@@ -101,6 +111,14 @@
     }
   ],
   "users": [
+    {
+      "username": "service-account-kb-api",
+      "enabled": true,
+      "serviceAccountClientId": "kb-api",
+      "clientRoles": {
+        "realm-management": ["view-users"]
+      }
+    },
     {
       "username": "ivanov",
       "enabled": true,

@@ -7,6 +7,7 @@ from app.use_cases.common import parse_uuid, require_super
 from app.use_cases.errors import DomainError, name_conflict
 from app.use_cases.groups.constants import NAME_MAX_LEN
 from app.use_cases.groups.dto import to_out
+from app.use_cases.lifecycle.audit import audit_log
 from app.use_cases.permissions.cache import commit_rights
 
 
@@ -16,7 +17,7 @@ def normalize_name(name: str) -> str:
 
 
 def create_group(
-    db: Session, is_super: bool, name: str, parent_id: str | None
+    db: Session, is_super: bool, name: str, parent_id: str | None, actor=None
 ) -> dict:
     require_super(is_super)
     _validate_name(name)
@@ -46,6 +47,9 @@ def create_group(
     db.flush()
     # parent_path завершается "/"; корневой — "". Сегмент = id + "/"
     g.path = f"{parent_path}{g.id}/"
+    # US-049 ш.1 (FR-140, LLD §11 group.create)
+    if actor is not None:
+        audit_log(db, actor, "group.create", "group", g.id, details={"name": g.name})
     commit_rights(db)
     return to_out(g)
 

@@ -6,9 +6,10 @@ from app.db import models
 from app.use_cases.common import parse_uuid, require_super
 from app.use_cases.dictionaries.dto import to_out
 from app.use_cases.errors import DomainError, name_conflict, not_found
+from app.use_cases.lifecycle.audit import audit_log
 
 
-def rename_dictionary(db: Session, is_super: bool, dictionary_id: str, name: str) -> dict:
+def rename_dictionary(db: Session, is_super: bool, dictionary_id: str, name: str, actor=None) -> dict:
     require_super(is_super)
     d = db.execute(
         select(models.Dictionary).where(models.Dictionary.id == parse_uuid(dictionary_id))
@@ -25,6 +26,11 @@ def rename_dictionary(db: Session, is_super: bool, dictionary_id: str, name: str
     ).scalar_one_or_none()
     if dup:
         raise name_conflict("Справочник с таким названием уже существует")
+    old_name = d.name
     d.name = name.strip()
+    # US-049 ш.1 (FR-140, LLD §11 dictionary.rename)
+    if actor is not None:
+        audit_log(db, actor, "dictionary.rename", "dictionary", d.id,
+                  details={"old": old_name, "new": d.name})
     db.commit()
     return to_out(d)

@@ -7,6 +7,7 @@ from app.db import models
 from app.use_cases.attributes.dto import to_out
 from app.use_cases.common import parse_uuid, require_super
 from app.use_cases.errors import DomainError, name_conflict, not_found
+from app.use_cases.lifecycle.audit import audit_log
 
 
 def update_attribute(
@@ -16,6 +17,7 @@ def update_attribute(
     name: str | None = None,
     is_required: bool | None = None,
     display_order: int | None = None,
+    actor=None,
 ) -> dict:
     require_super(is_super)
     a = db.execute(
@@ -40,5 +42,9 @@ def update_attribute(
         a.is_required = is_required
     if display_order is not None:
         a.display_order = display_order
+    # US-049 ш.1 (FR-140, LLD §11 attribute.update)
+    if actor is not None:
+        audit_log(db, actor, "attribute.update", "attribute", a.id,
+                  details={"name": a.name})
     db.commit()
     return to_out(a)

@@ -17,10 +17,22 @@ SORT_FIELDS = {
 }
 
 
-def clamp_page(page: int, per_page: int) -> tuple[int, int]:
-    """FR-131: per_page 1..200 (по умолчанию 50), page ≥ 1."""
+def clamp_page(page: int, per_page: int, db: Session | None = None) -> tuple[int, int]:
+    """FR-131: per_page 1..200 (по умолчанию — параметр page_size §2.5), page ≥ 1."""
     page = max(1, int(page or 1))
-    per_page = min(200, max(1, int(per_page or 50)))
+    if per_page:
+        per_page = min(200, max(1, int(per_page)))
+    else:
+        # параметр page_size (FR-121, US-048); 50 — значение сида/фолбэк
+        per_page = 50
+        if db is not None:
+            try:
+                from app.use_cases.admin.settings import get_settings_value
+
+                per_page = int(get_settings_value(db, "page_size", 50) or 50)
+            except Exception:
+                pass  # таблица/параметр отсутствуют — сида достаточно
+        per_page = min(200, max(1, per_page))
     return page, per_page
 
 
@@ -45,7 +57,7 @@ def list_materials(
     пагинация FR-121."""
     M = models.Material
     G = aliased(models.Group)
-    page, per_page = clamp_page(page, per_page)
+    page, per_page = clamp_page(page, per_page, db)
 
     stmt = select(M).join(G, G.id == M.group_id).where(M.is_deleted.is_(False))
 

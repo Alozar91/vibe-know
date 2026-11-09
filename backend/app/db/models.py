@@ -756,14 +756,17 @@ class SearchAnalytics(Base):
 class SystemSetting(Base):
     """system_settings (NFR-020): реестр параметров §2.5 (значения — jsonb).
 
-    value хранится строкой JSON (Text) — jsonb-тип непортабелен на SQLite;
-    в PostgreSQL миграция 0008 создаёт колонку как JSONB.
+    На PostgreSQL колонка JSONB (миграция 0008); в SQLite (тесты) — JSON.
+    SQLAlchemy декодирует значение автоматически: row.value — объект
+    (число/строка/список/dict), не JSON-строка.
     """
 
     __tablename__ = "system_settings"
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
-    value: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-строка
+    value: Mapped[object] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False
+    )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

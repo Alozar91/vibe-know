@@ -387,7 +387,8 @@ def test_material_attributes_and_tags(client, db):
     card = client.get(f"/api/v1/materials/{r.json()['id']}").json()
     attrs = {a["attribute_id"]: a for a in card["attributes"]}
     assert len(attrs[a_multi["id"]]["values"]) == 2
-    assert attrs[a_dict["id"]]["values"] == [v["id"]]
+    # dictionary-значение резолвится в текст значения справочника (FR-049, US-031)
+    assert attrs[a_dict["id"]]["values"] == [v["value"]]
 
     from app.use_cases.materials.tags_io import TAGS_MAX
     tags = [client.post("/api/v1/tags", json={"name": f"тег{i}"}).json()["id"] for i in range(TAGS_MAX + 1)]

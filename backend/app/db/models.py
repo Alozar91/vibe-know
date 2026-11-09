@@ -405,6 +405,9 @@ class Material(TimestampMixin, Base):
         Index("ix_materials_group", "group_id"),
         Index("ix_materials_author", "author_id"),
         Index("ix_materials_status", "status"),
+        # Этап 7 (LLD §2.3/§2.4): FR-032; список подчинённых/валидаторы
+        CheckConstraint("master_id IS NULL OR master_id <> id", name="ck_materials_master_not_self"),
+        Index("ix_materials_master", "master_id"),
     )
 
 
@@ -641,4 +644,35 @@ class SystemTask(TimestampMixin, Base):
         # B-tree (task_type, state) — мониторинг очередей (NFR-019, §2.4)
         Index("ix_system_tasks_type_state", "task_type", "state"),
         Index("ix_system_tasks_object", "object_type", "object_id"),
+    )
+
+
+# ==========================================================================
+# Этап 7: мастер-подчинённый (LLD §2.2 comments, §2.3; FR-032–042, FR-096–098)
+# ==========================================================================
+
+class Comment(TimestampMixin, Base):
+    """comments (7.6, FR-096–098): append-only — без UPDATE/DELETE (§2.2).
+
+    created_at перекрывает TimestampMixin (нужен server_default по LLD §2.2).
+    """
+
+    __tablename__ = "comments"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=new_uuid)
+    material_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("materials.id", ondelete="RESTRICT"), nullable=False
+    )
+    author_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        # B-tree по объекту/дате (§2.4): лента комментариев карточки
+        Index("ix_comments_material", "material_id", "created_at"),
+        Index("ix_comments_author", "author_id"),
     )

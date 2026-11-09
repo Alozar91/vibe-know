@@ -6,6 +6,13 @@ export interface Page<T> {
   per_page: number
 }
 
+export interface DictionaryInfo {
+  id: string
+  name: string
+  values: string[]
+  value_items: { id: string; value: string }[]
+}
+
 export interface GroupNode {
   id: string
   name: string
@@ -41,6 +48,9 @@ export interface MaterialCard extends Material {
   attributes: MaterialAttribute[]
   tag_ids: string[]
   permissions: Record<string, boolean> // FR-129: карта прав пользователя
+  master_id: string | null // этап 7 (FR-126)
+  master: { id: string; name: string; status: Material['status'] } | null
+  children: { id: string; name: string; status: Material['status']; group_id: string }[]
 }
 
 export interface MaterialAttribute {
@@ -110,6 +120,15 @@ export interface VersionDiff {
   file_changed: boolean
   text_diff: string[]
   metadata_changes: { field: string; old: string; new: string }[]
+}
+
+// Этап 7: комментарии (7.6, FR-096–098)
+export interface CommentInfo {
+  id: string
+  material_id: string
+  author_id: string
+  text: string
+  created_at: string
 }
 
 export const SCAN_RU: Record<NonNullable<FileState['scan_state']>, string> = {

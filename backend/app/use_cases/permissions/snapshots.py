@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.db import models
 from app.use_cases.common import parse_uuid, require_super
 from app.use_cases.errors import DomainError, not_found
+from app.use_cases.lifecycle.audit import audit_log
 from app.use_cases.permissions.eff import PERMISSIONS_CATALOG
 from app.use_cases.permissions.cache import commit_rights
 
@@ -83,6 +84,7 @@ def create_snapshot(
     object_id: str,
     role_id: str | None,
     entries: list[dict] | None = None,
+    actor=None,
 ) -> dict:
     """Создание снапшота: копия набора прав шаблона (FR-100/105, US-044 шаг 1).
 
@@ -132,6 +134,16 @@ def create_snapshot(
         else:
             snap.entries.append(models.PermissionEntry(permission=models.PermissionCode(perm), state=state))
     db.add(snap)
+    db.flush()
+    # US-049 ш.1 (FR-140, LLD §11 snapshot.create): до commit_rights
+    if actor is not None:
+        audit_log(
+            db, actor, "snapshot.create", "permission_snapshot", snap.id,
+            details={"object_type": object_type, "object_id": str(oid),
+                     "role_id": str(role.id) if role else None,
+                     "entries": [{"permission": e.permission.value if hasattr(e.permission, "value") else str(e.permission),
+                                  "state": e.state} for e in snap.entries]},
+        )
     commit_rights(db)
     db.expire(snap, ["entries"])
     return _to_out(snap)
@@ -142,6 +154,7 @@ def update_snapshot(
     is_super: bool,
     snapshot_id: str,
     entries: list[dict],
+    actor=None,
 ) -> dict:
     """Правка состояний снапшота (US-044 шаг 2): allow/deny/unset."""
     require_super(is_super)
@@ -161,17 +174,27 @@ def update_snapshot(
             existing.state = state
         else:
             snap.entries.append(models.PermissionEntry(permission=models.PermissionCode(perm), state=state))
+    # US-049 ш.1 (FR-140, LLD §11 snapshot.update): до commit_rights
+    if actor is not None:
+        audit_log(
+            db, actor, "snapshot.update", "permission_snapshot", snap.id,
+            details={"entries": [{"permission": p, "state": s} for p, s in parsed]},
+        )
     commit_rights(db)
     db.expire(snap, ["entries"])
     return _to_out(snap)
 
 
-def delete_snapshot(db: Session, is_super: bool, snapshot_id: str) -> None:
+def delete_snapshot(db: Session, is_super: bool, snapshot_id: str, actor=None) -> None:
     require_super(is_super)
     snap = db.execute(
         select(models.PermissionSnapshot).where(models.PermissionSnapshot.id == parse_uuid(snapshot_id))
     ).scalar_one_or_none()
     if snap is None:
         raise not_found("Снапшот не найден")
+    sid = snap.id
     db.delete(snap)
+    # US-049 ш.1 (FR-140, LLD §11 snapshot.delete): до commit_rights
+    if actor is not None:
+        audit_log(db, actor, "snapshot.delete", "permission_snapshot", sid)
     commit_rights(db)

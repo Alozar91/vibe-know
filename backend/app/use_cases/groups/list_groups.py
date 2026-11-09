@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import models
-from app.use_cases.groups.dto import to_tree
+from app.use_cases.groups.dto import to_out, to_tree
 
 
 def list_groups(
@@ -17,4 +17,8 @@ def list_groups(
     elif not include_deleted:
         stmt = stmt.where(models.Group.is_deleted.is_(False))
     rows = db.execute(stmt).scalars().all()
+    if only_deleted:
+        # Плоский список (не дерево): родитель удалённого узла может быть жив
+        # и не попасть в выборку — дерево потеряло бы узел (US-050)
+        return [{**to_out(g), "children": []} for g in rows]
     return to_tree(list(rows))

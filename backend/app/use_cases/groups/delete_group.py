@@ -8,11 +8,12 @@ from app.db import models
 from app.use_cases.common import get_group_or_404, require_super
 from app.use_cases.errors import DomainError, domain_rule_violation, not_found
 from app.use_cases.groups.dto import to_out
+from app.use_cases.lifecycle.audit import audit_log
 from app.use_cases.permissions.cache import commit_rights
 
 
 def delete_group(
-    db: Session, is_super: bool, group_id: str, confirm_rights: bool = False
+    db: Session, is_super: bool, group_id: str, confirm_rights: bool = False, actor=None
 ) -> dict:
     """Решение физ/soft — система; предупреждение о правах — без confirm_rights → 409.
 
@@ -43,6 +44,10 @@ def delete_group(
             )
         _delete_snapshots(db, subtree)
         db.delete(g)
+        # US-049 ш.1 (FR-140, LLD §11 group.delete): до commit_rights
+        if actor is not None:
+            audit_log(db, actor, "group.delete", "group", g.id,
+                      details={"mode": "hard", "name": g.name})
         commit_rights(db)
         return {"mode": "hard", "subtree_count": 1}
 
@@ -53,6 +58,10 @@ def delete_group(
     for node in subtree:
         node.is_deleted = True
         node.deleted_at = now
+    # US-049 ш.1 (FR-140, LLD §11 group.delete)
+    if actor is not None:
+        audit_log(db, actor, "group.delete", "group", g.id,
+                  details={"mode": "soft", "name": g.name, "subtree_count": len(subtree)})
     commit_rights(db)
     return {"mode": "soft", "subtree_count": len(subtree)}
 

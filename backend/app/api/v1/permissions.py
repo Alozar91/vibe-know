@@ -35,7 +35,7 @@ def _object_router(object_type: str, prefix: str, tag: str) -> APIRouter:
 
         return create_snapshot(
             db, user.is_super, user.user_id, object_type, object_id,
-            body.role_id, [e.model_dump() for e in body.entries],
+            body.role_id, [e.model_dump() for e in body.entries], actor=user,
         )
 
     return r
@@ -53,14 +53,14 @@ class SnapshotPatch(BaseModel):
 async def patch_snapshot_ep(snapshot_id: str, body: SnapshotPatch, user: CurrentUserDep, db: Session = Depends(get_db)) -> dict:
     from app.use_cases.permissions.snapshots import update_snapshot
 
-    return update_snapshot(db, user.is_super, snapshot_id, [e.model_dump() for e in body.entries])
+    return update_snapshot(db, user.is_super, snapshot_id, [e.model_dump() for e in body.entries], actor=user)
 
 
 @snapshot_router.delete("/permissions/snapshots/{snapshot_id}", status_code=204)
 async def delete_snapshot_ep(snapshot_id: str, user: CurrentUserDep, db: Session = Depends(get_db)) -> None:
     from app.use_cases.permissions.snapshots import delete_snapshot
 
-    delete_snapshot(db, user.is_super, snapshot_id)
+    delete_snapshot(db, user.is_super, snapshot_id, actor=user)
 
 
 # Подключение: /materials/{id}/permissions, /groups/{id}/permissions

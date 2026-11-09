@@ -233,17 +233,9 @@ def _master_change_criterion_allows(db: Session, content_changed: bool, meta_cha
     """Критерий «изменения мастера» (FR-038, system_settings §2.5):
     'content' (по умолчанию) — только контент (файл/текст);
     'any' — любое изменение (включая метаданные)."""
-    import json as _json
+    from app.use_cases.admin.settings import get_settings_value
 
-    row = db.execute(
-        select(models.SystemSetting).where(models.SystemSetting.key == "master_change_criterion")
-    ).scalar_one_or_none()
-    criterion = "content"
-    if row is not None:
-        try:
-            criterion = _json.loads(row.value)
-        except Exception:
-            criterion = "content"
+    criterion = get_settings_value(db, "master_change_criterion", "content")
     if criterion == "any":
         return content_changed or meta_changed
     return bool(content_changed)

@@ -15,11 +15,12 @@ def audit_log(
 ) -> None:
     """Запись аудита: кто (actor), когда (occurred_at — server_default), что, над чем.
 
-    Системные события (конвейер файлов, этап 6) — user=None, is_service=True.
+    user — principal (CurrentUser: user_id) или models.User (id) или None;
+    системные события (конвейер файлов, этап 6) — user=None, is_service=True.
     """
     db.add(
         models.AuditEntry(
-            actor_user_id=getattr(user, "user_id", None),
+            actor_user_id=getattr(user, "user_id", None) or getattr(user, "id", None),
             actor_is_service=bool(getattr(user, "is_service", False)),
             action=action,
             object_type=object_type,

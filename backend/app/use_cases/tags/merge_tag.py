@@ -6,9 +6,10 @@ from sqlalchemy.orm import Session
 from app.db import models
 from app.use_cases.common import parse_uuid, require_super
 from app.use_cases.errors import DomainError, not_found
+from app.use_cases.lifecycle.audit import audit_log
 
 
-def merge_tag(db: Session, is_super: bool, tag_id: str, target_id: str) -> dict:
+def merge_tag(db: Session, is_super: bool, tag_id: str, target_id: str, actor=None) -> dict:
     require_super(is_super)
     if tag_id == target_id:
         raise DomainError(status=400, code="VALIDATION_ERROR", title="Ошибка валидации запроса",
@@ -51,5 +52,10 @@ def merge_tag(db: Session, is_super: bool, tag_id: str, target_id: str) -> dict:
         ).scalar_one_or_none()
         if m is not None:
             update_search_vector(db, m)
+    # US-049 ш.1 (FR-140, LLD §11 tag.merge)
+    if actor is not None:
+        audit_log(db, actor, "tag.merge", "tag", target.id,
+                  details={"source": str(src.id), "source_name": src.name,
+                           "target_name": target.name})
     db.commit()
     return {"merged_into": str(target.id), "name": target.name}

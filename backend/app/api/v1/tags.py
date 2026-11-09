@@ -32,7 +32,9 @@ async def list_tags_ep(
 @router.post("/tags", status_code=201)
 async def create_tag_ep(user: CurrentUserDep, body: TagIn, db: Session = Depends(get_db)) -> dict:
     """Создание тега (US-033 шаг 2) — СА."""
-    return create_tag(db, user.is_super, body.name)
+    from app.use_cases.tags.create_tag import create_tag as uc
+
+    return uc(db, user.is_super, body.name, actor=user)
 
 
 @router.post("/tags/{tag_id}:merge")
@@ -40,10 +42,14 @@ async def merge_tag_ep(
     user: CurrentUserDep, tag_id: str, body: TagMergeIn, db: Session = Depends(get_db)
 ) -> dict:
     """Слияние тегов (FR-053, US-033 шаг 3) — СА."""
-    return merge_tag(db, user.is_super, tag_id, body.target_id)
+    from app.use_cases.tags.merge_tag import merge_tag as uc
+
+    return uc(db, user.is_super, tag_id, body.target_id, actor=user)
 
 
 @router.delete("/tags/{tag_id}", status_code=204)
 async def delete_tag_ep(user: CurrentUserDep, tag_id: str, db: Session = Depends(get_db)) -> None:
     """Удаление тега (FR-054: запрет при использовании) — СА."""
-    delete_tag(db, user.is_super, tag_id)
+    from app.use_cases.tags.delete_tag import delete_tag as uc
+
+    uc(db, user.is_super, tag_id, actor=user)

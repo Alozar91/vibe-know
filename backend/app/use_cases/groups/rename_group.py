@@ -8,10 +8,11 @@ from app.use_cases.errors import DomainError
 from app.use_cases.groups.constants import NAME_MAX_LEN
 from app.use_cases.groups.create_group import normalize_name
 from app.use_cases.groups.dto import to_out
+from app.use_cases.lifecycle.audit import audit_log
 from app.use_cases.permissions.cache import commit_rights
 
 
-def rename_group(db: Session, is_super: bool, group_id: str, name: str) -> dict:
+def rename_group(db: Session, is_super: bool, group_id: str, name: str, actor=None) -> dict:
     """Переименование; path не меняется (перенос/перестроение не предусмотрены, FR-023)."""
     require_super(is_super)
     if not name or not name.strip():
@@ -39,5 +40,9 @@ def rename_group(db: Session, is_super: bool, group_id: str, name: str) -> dict:
                               detail="Группа с таким названием уже существует в этом разделе")
     g.name = name.strip()
     g.normalized_name = new_normalized
+    # US-049 ш.1 (FR-140, LLD §11 group.rename)
+    if actor is not None:
+        audit_log(db, actor, "group.rename", "group", g.id,
+                  details={"name": g.name})
     commit_rights(db)
     return to_out(g)

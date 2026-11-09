@@ -2,6 +2,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    admin,
     attributes,
     dictionaries,
     files,
@@ -41,5 +42,6 @@ api_router.include_router(lifecycle.rules_router)
 api_router.include_router(search.router)
 api_router.include_router(notifications.router)
 api_router.include_router(notifications.router_triggers)
+api_router.include_router(admin.router)
 
-# Дальше по этапам: admin/audit/settings (10).
+# Дальше: этап 11 (НФТ/приёмка).

@@ -580,9 +580,12 @@ def test_audit_entries_written(sa, db):
 
     rows = db.query(models.AuditEntry).order_by(models.AuditEntry.id).all()
     actions = [r.action for r in rows]
+    # Этап 10 (US-049, FR-140): создание материала теперь тоже в журнале
+    assert "material.create" in actions
     assert "material.status_change" in actions
     assert "transition_matrix.change" in actions
-    assert rows[0].details["from"] == "draft"
+    status_row = next(r for r in rows if r.action == "material.status_change")
+    assert status_row.details["from"] == "draft"
 
 
 # --- §4.2: правки по статусам (US-009; файл — этап 6, здесь — текст) ---

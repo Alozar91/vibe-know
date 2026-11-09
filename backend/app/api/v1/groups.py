@@ -53,7 +53,9 @@ async def get_group_ep(user: CurrentUserDep, group_id: str, db: Session = Depend
 @router.post("/groups", status_code=201)
 async def create_group_ep(user: CurrentUserDep, body: GroupIn, db: Session = Depends(get_db)) -> dict:
     """Создание группы (FR-015/016, US-052 шаг 1) — СА."""
-    return create_group(db, user.is_super, body.name, body.parent_id)
+    from app.use_cases.groups.create_group import create_group as uc
+
+    return uc(db, user.is_super, body.name, body.parent_id, actor=user)
 
 
 @router.patch("/groups/{group_id}")
@@ -61,7 +63,9 @@ async def rename_group_ep(
     user: CurrentUserDep, group_id: str, body: GroupPatch, db: Session = Depends(get_db)
 ) -> dict:
     """Переименование (FR-015, US-052 шаг 3) — СА."""
-    return rename_group(db, user.is_super, group_id, body.name)
+    from app.use_cases.groups.rename_group import rename_group as uc
+
+    return uc(db, user.is_super, group_id, body.name, actor=user)
 
 
 @router.delete("/groups/{group_id}")
@@ -70,4 +74,6 @@ async def delete_group_ep(
     db: Session = Depends(get_db),
 ) -> dict:
     """Удаление: физ./soft решает система; права — с подтверждением (FR-018–020, US-052)."""
-    return delete_group(db, user.is_super, group_id, confirm_rights=confirm_rights)
+    from app.use_cases.groups.delete_group import delete_group as uc
+
+    return uc(db, user.is_super, group_id, confirm_rights=confirm_rights, actor=user)

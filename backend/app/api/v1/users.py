@@ -40,5 +40,5 @@ async def get_user(user: CurrentUserDep, user_id: str, db: Session = Depends(get
 @router.delete("/users/{user_id}")
 async def deactivate_user(user: CurrentUserDep, user_id: str, db: Session = Depends(get_db)) -> dict:
     """Деактивация (soft, FR-006/FR-011) — СА."""
-    u = deactivate_user_uc(db, user.db_user, user.is_super, user_id)
+    u = deactivate_user_uc(db, user.db_user, user.is_super, user_id, actor_principal=user)
     return {"id": u.id, "is_deactivated": u.is_deactivated}

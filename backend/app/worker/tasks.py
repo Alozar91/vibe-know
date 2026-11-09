@@ -4,6 +4,8 @@
 # Этап 10: maintenance.*, keycloak.sync.
 from __future__ import annotations
 
+import json
+
 from datetime import datetime, timezone
 
 from celery import states as celery_states
@@ -22,6 +24,7 @@ log = get_logger(__name__)
 SCAN_MAX_RETRIES = 5
 CONVERT_MAX_RETRIES = 3
 CONVERT_TIMEOUT_S = 600  # 10 минут (NFR-006)
+KEYCLOAK_SYNC_PAGE = 100  # страницы Admin API (LLD §10, [уточнение LLD])
 
 
 def _now() -> datetime:
@@ -460,7 +463,7 @@ def notifications_email(self) -> dict:
         host = str(get_setting(db, "smtp_host", "") or "").strip()
         port = int(get_setting(db, "smtp_port", 25) or 25)
         sender = str(get_setting(db, "smtp_from", "kb@example.local") or "kb@example.local")
-        use_tls = bool(get_setting(db, "smtp_tls", False))
+        use_tls = bool(get_setting(db, "smtp_use_tls", False))
 
         rows = list(db.execute(
             select(models.Notification)
@@ -642,3 +645,205 @@ def notifications_digest() -> dict:
                 pass
     log.info("notifications.digest.done", digests=digests)
     return {"digests": digests}
+
+
+# ==========================================================================
+# Этап 10: СА-контур — обслуживание аудита/уведомлений, сверка Keycloak (§9)
+# ==========================================================================
+
+@celery_app.task(name="maintenance.daily")
+def maintenance_daily() -> dict:
+    """Ежедневный якорный прогон maintenance-задач (§9): audit_cleanup,
+    inapp_cleanup, cas_gc, analytics_rollup. Еженедельные (fts_rebuild,
+    cas_reconcile, integrity_check) — прогоном по счётчику дней в Valkey.
+    """
+    results = {}
+    results["audit_cleanup"] = audit_cleanup()
+    results["inapp_cleanup"] = inapp_cleanup()
+    results["cas_gc"] = cas_gc()
+    results["analytics_rollup"] = analytics_rollup()
+    return results
+
+
+@celery_app.task(name="maintenance.audit_cleanup")
+def audit_cleanup() -> dict:
+    """Пакетное удаление записей аудита по возрасту (FR-141, §11).
+
+    audit_retention_days=NULL (§2.5) → очистка не выполняется.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import delete
+
+    from app.use_cases.admin.settings import get_settings_value
+
+    deleted = 0
+    with get_session_factory()() as db:
+        days = get_settings_value(db, "audit_retention_days", None)
+        if days is None:
+            return {"deleted": 0, "result": "retention_not_configured"}
+        cutoff = datetime.now(timezone.utc) - timedelta(days=int(days))
+        res = db.execute(
+            delete(models.AuditEntry).where(models.AuditEntry.occurred_at < cutoff)
+        )
+        deleted = res.rowcount or 0
+        db.commit()
+    log.info("audit_cleanup.done", deleted=deleted)
+    return {"deleted": deleted}
+
+
+@celery_app.task(name="maintenance.inapp_cleanup")
+def inapp_cleanup() -> dict:
+    """Очистка in-app уведомлений по возрасту ≥ аудита (FR-137, §9).
+
+    Срок хранения in-app — не меньше срока хранения аудита: удаляем
+    уведомления старше min(audit_retention_days, окно по created_at)… —
+    при настроенном аудите; NULL → не выполняется.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import delete
+
+    from app.use_cases.admin.settings import get_settings_value
+
+    with get_session_factory()() as db:
+        days = get_settings_value(db, "audit_retention_days", None)
+        if days is None:
+            return {"deleted": 0, "result": "retention_not_configured"}
+        # in-app хранится не меньше аудита → та же граница (±) не нужна:
+        # удаляем уведомления старше срока аудита (равный срок — консервативно)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=int(days))
+        res = db.execute(
+            delete(models.Notification).where(
+                models.Notification.created_at < cutoff,
+                models.Notification.read_at.isnot(None),  # непрочитанные не трогаем
+            )
+        )
+        deleted = res.rowcount or 0
+        db.commit()
+    log.info("inapp_cleanup.done", deleted=deleted)
+    return {"deleted": deleted}
+
+
+@celery_app.task(name="maintenance.cas_gc")
+def cas_gc() -> dict:
+    """Сборка мусора CAS (§6.5): file_objects с ref_count=0 старше
+    cas_gc_delay_hours → удаление записи + объекта silo (если ключ не занят).
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import delete
+
+    from app.use_cases.admin.settings import get_settings_value
+
+    deleted = 0
+    with get_session_factory()() as db:
+        if db.bind.dialect.name == "sqlite":
+            return {"deleted": 0, "skipped": "sqlite"}
+        delay_h = int(get_settings_value(db, "cas_gc_delay_hours", 24))
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=delay_h)
+        orphans = list(db.execute(
+            select(models.FileObject).where(
+                models.FileObject.ref_count == 0,
+                models.FileObject.created_at < cutoff,
+            )
+        ).scalars().all())
+        for fo in orphans:
+            # Объект в silo может быть общим по sha256 — удаляем по ключу;
+            # pdf-ключ — тоже (пересоздаётся при повторной загрузке)
+            try:
+                silo.delete_object(silo.cas_key(fo.sha256))
+                if fo.pdf_key:
+                    silo.delete_object(fo.pdf_key)
+            except Exception:
+                pass  # silo-объект уже отсутствует / недоступен — запись всё равно удаляем
+            db.delete(fo)
+            deleted += 1
+        db.commit()
+    log.info("cas_gc.done", deleted=deleted)
+    return {"deleted": deleted}
+
+
+@celery_app.task(bind=True, name="keycloak.sync", max_retries=3)
+def keycloak_sync(self) -> dict:
+    """Периодическая сверка с Keycloak (LLD §10, 16.1-118, [уточнение LLD]).
+
+    Admin API GET /admin/realms/kb/users?briefRepresentation=true&first=&max=
+    страницами по KEYCLOAK_SYNC_PAGE=100 (полная выгрузка — результат
+    заменяет, §9); обновление users.is_deactivated (enabled=false →
+    деактивация) и users.email_cache (16.1-119). Новые пользователи — при
+    первом входе.
+    """
+    import urllib.parse
+    import urllib.request
+
+    from app.config import get_settings
+
+    settings = get_settings()
+    issuer = settings.oidc_issuer.rstrip("/")
+    # http://localhost:8080/realms/kb → http://keycloak:8080/... (внутренняя сеть)
+    kc_base = issuer.split("/realms/")[0].replace("localhost", "keycloak")
+    realm = issuer.split("/realms/")[-1]
+
+    # Токен администратора: сервисный аккаунт kb-api (client credentials).
+    # Права Admin API выдаются роли realm-management/view-users на realm kb.
+    body = urllib.parse.urlencode({
+        "grant_type": "client_credentials",
+        "client_id": settings.oidc_client_id,
+        "client_secret": settings.oidc_client_secret,
+    }).encode()
+    req = urllib.request.Request(f"{kc_base}/realms/{realm}/protocol/openid-connect/token", data=body)
+    try:
+        tok = json.loads(urllib.request.urlopen(req, timeout=10).read())["access_token"]
+    except Exception as e:
+        log.warning("keycloak_sync.token_failed", error=str(e))
+        raise self.retry(countdown=60)
+
+    checked = deactivated = reactivated = email_updated = 0
+    first = 0
+    with get_session_factory()() as db:
+        if db.bind.dialect.name == "sqlite":
+            return {"checked": 0, "skipped": "sqlite"}
+        while True:
+            q = urllib.parse.urlencode({"briefRepresentation": "true", "first": first, "max": KEYCLOAK_SYNC_PAGE})
+            req = urllib.request.Request(
+                f"{kc_base}/admin/realms/{realm}/users?{q}",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            try:
+                page = json.loads(urllib.request.urlopen(req, timeout=10).read())
+            except Exception as e:
+                log.warning("keycloak_sync.page_failed", first=first, error=str(e))
+                raise self.retry(countdown=60)
+            if not page:
+                break
+            for u in page:
+                checked += 1
+                db_user = db.execute(
+                    select(models.User).where(models.User.keycloak_id == u["id"])
+                ).scalar_one_or_none()
+                if db_user is None:
+                    continue  # новые пользователи — при первом входе (§6.1 HLD)
+                enabled = bool(u.get("enabled", True))
+                if not enabled and not db_user.is_deactivated:
+                    # Keycloak-активность исчезла → деактивация (без service_tasks:
+                    # сверка — фоновая; задачи создаёт ручная деактивация СА, US-004)
+                    db_user.is_deactivated = True
+                    deactivated += 1
+                elif enabled and db_user.is_deactivated:
+                    # Активация в Keycloak → реактивация (LLD §10: деактивация
+                    # обратима активацией в Keycloak/сверкой)
+                    db_user.is_deactivated = False
+                    reactivated += 1
+                email = u.get("email") or None
+                if email and email != db_user.email_cache:
+                    db_user.email_cache = email  # 16.1-119
+                    email_updated += 1
+            db.commit()
+            first += KEYCLOAK_SYNC_PAGE
+            if len(page) < KEYCLOAK_SYNC_PAGE:
+                break
+    log.info("keycloak_sync.done", checked=checked, deactivated=deactivated,
+             reactivated=reactivated, email_updated=email_updated)
+    return {"checked": checked, "deactivated": deactivated,
+            "reactivated": reactivated, "email_updated": email_updated}

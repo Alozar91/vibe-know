@@ -15,7 +15,9 @@ async def assign_role_ep(
     user: CurrentUserDep, user_id: str, role_id: str, db: Session = Depends(get_db)
 ) -> None:
     """Назначение роли — служебный раздел СА (FR-007, US-003 шаг 2)."""
-    assign_role(db, user.is_super, user_id, role_id)
+    from app.use_cases.roles.assign_role import assign_role as uc
+
+    uc(db, user.is_super, user_id, role_id, actor=user)
 
 
 @router.delete("/users/{user_id}/roles/{role_id}", status_code=204)
@@ -23,4 +25,6 @@ async def revoke_role_ep(
     user: CurrentUserDep, user_id: str, role_id: str, db: Session = Depends(get_db)
 ) -> None:
     """Снятие роли (FR-007, FR-010) — СА."""
-    revoke_role(db, user.is_super, user_id, role_id)
+    from app.use_cases.roles.revoke_role import revoke_role as uc
+
+    uc(db, user.is_super, user_id, role_id, actor=user)

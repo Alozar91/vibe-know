@@ -36,16 +36,10 @@ from app.db import models
 
 
 def get_setting(db: Session, key: str, default):
-    """Чтение параметра §2.5 (system_settings; value — JSON-строка)."""
-    row = db.execute(
-        select(models.SystemSetting).where(models.SystemSetting.key == key)
-    ).scalar_one_or_none()
-    if row is None:
-        return default
-    try:
-        return json.loads(row.value)
-    except Exception:
-        return default
+    """Чтение параметра §2.5 (system_settings; значение JSONB — декодировано)."""
+    from app.use_cases.admin.settings import get_settings_value
+
+    return get_settings_value(db, key, default)
 
 
 def smtp_configured(db: Session) -> bool:

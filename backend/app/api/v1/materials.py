@@ -1,5 +1,7 @@
 # Materials — транспорт (LLD §12.3). Логика: use_cases/materials/*.
 # If-Match на мутациях (FR-095); ETag в ответе = "<version>" (LLD §12.1).
+import uuid
+
 from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -40,7 +42,7 @@ async def list_materials_ep(
     sort: str = "updated_at",
     order: str = "desc",
     page: int = 1,
-    per_page: int = 50,
+    per_page: int | None = None,
     section: str | None = None,
 ) -> dict:
     """Список с фильтрами/сортировкой/пагинацией (FR-112/115–117/121; US-005/006)."""
@@ -81,13 +83,19 @@ async def deleted_materials_ep(user: CurrentUserDep, db: Session = Depends(get_d
 @router.post("/materials", status_code=201)
 async def create_material_ep(user: CurrentUserDep, body: MaterialIn, db: Session = Depends(get_db)) -> dict:
     """Создание (в т.ч. пустышка) — право create в группе (FR-024–026)."""
+    from app.use_cases.lifecycle.audit import audit_log
     from app.use_cases.materials.create_material import create_material
 
-    return create_material(
+    out = create_material(
         db, user, body.group_id, body.name, body.type_id,
         text_content=body.text_content,
         attribute_values=body.attribute_values, tag_ids=body.tag_ids,
     )
+    # US-049 ш.1 (FR-140): создание — в журнале
+    audit_log(db, user, "material.create", "material",
+              uuid.UUID(out["id"]))
+    db.commit()
+    return out
 
 
 @router.get("/materials/{material_id}")
@@ -143,9 +151,14 @@ async def delete_material_ep(
     """Soft-delete (FR-090): только draft/in_review; право delete; 204 + ETag."""
     from fastapi import Response
 
+    from app.use_cases.lifecycle.audit import audit_log
     from app.use_cases.materials.delete_material import delete_material
 
     result = delete_material(db, user, material_id, if_match)
+    # US-049 ш.1 (FR-140): удаление — в журнале
+    audit_log(db, user, "material.delete", "material", uuid.UUID(result["id"]),
+              details={"version": result["version"]})
+    db.commit()
     return Response(status_code=204, headers={"ETag": f'"{result["version"]}"'})
 
 

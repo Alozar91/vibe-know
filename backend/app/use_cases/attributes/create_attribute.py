@@ -7,6 +7,7 @@ from app.db import models
 from app.use_cases.attributes.dto import MULTIVALUE_ALLOWED, VALUE_TYPES, to_out
 from app.use_cases.common import parse_uuid, require_super
 from app.use_cases.errors import DomainError, name_conflict
+from app.use_cases.lifecycle.audit import audit_log
 
 
 def create_attribute(
@@ -18,6 +19,7 @@ def create_attribute(
     is_required: bool = False,
     display_order: int = 0,
     dictionary_id: str | None = None,
+    actor=None,
 ) -> dict:
     require_super(is_super)
     if not name or not name.strip():
@@ -51,5 +53,10 @@ def create_attribute(
         dictionary_id=parse_uuid(dictionary_id) if dictionary_id else None,
     )
     db.add(a)
+    db.flush()
+    # US-049 ш.1 (FR-140, LLD §11 attribute.create)
+    if actor is not None:
+        audit_log(db, actor, "attribute.create", "attribute", a.id,
+                  details={"name": a.name, "value_type": value_type})
     db.commit()
     return to_out(a)

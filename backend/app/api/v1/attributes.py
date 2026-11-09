@@ -37,10 +37,12 @@ async def list_attributes_ep(user: CurrentUserDep, db: Session = Depends(get_db)
 @router.post("/attributes", status_code=201)
 async def create_attribute_ep(user: CurrentUserDep, body: AttributeIn, db: Session = Depends(get_db)) -> dict:
     """Создание атрибута (FR-044, US-030 шаг 1) — СА."""
-    return create_attribute(
+    from app.use_cases.attributes.create_attribute import create_attribute as uc
+
+    return uc(
         db, user.is_super, body.name, body.value_type,
         is_multivalue=body.is_multivalue, is_required=body.is_required,
-        display_order=body.display_order, dictionary_id=body.dictionary_id,
+        display_order=body.display_order, dictionary_id=body.dictionary_id, actor=user,
     )
 
 
@@ -49,13 +51,18 @@ async def update_attribute_ep(
     user: CurrentUserDep, attribute_id: str, body: AttributePatch, db: Session = Depends(get_db)
 ) -> dict:
     """Правка (FR-045: value_type/is_multivalue неизменяемы) — СА."""
-    return update_attribute(
+    from app.use_cases.attributes.update_attribute import update_attribute as uc
+
+    return uc(
         db, user.is_super, attribute_id,
         name=body.name, is_required=body.is_required, display_order=body.display_order,
+        actor=user,
     )
 
 
 @router.delete("/attributes/{attribute_id}", status_code=204)
 async def delete_attribute_ep(user: CurrentUserDep, attribute_id: str, db: Session = Depends(get_db)) -> None:
     """Удаление (FR-050: запрет при использовании) — СА."""
-    delete_attribute(db, user.is_super, attribute_id)
+    from app.use_cases.attributes.delete_attribute import delete_attribute as uc
+
+    uc(db, user.is_super, attribute_id, actor=user)

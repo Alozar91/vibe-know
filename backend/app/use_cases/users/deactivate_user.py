@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.db import models
 from app.use_cases.common import get_user_or_404, require_super
 from app.use_cases.errors import self_deactivation_forbidden
+from app.use_cases.lifecycle.audit import audit_log
 from app.use_cases.users.dto import UserOut, to_out
 from app.use_cases.permissions.cache import commit_rights
 
@@ -92,7 +93,8 @@ def _create_review_transfer_tasks(db: Session, u: models.User) -> int:
 
 
 def deactivate_user(
-    db: Session, actor: models.User, is_super: bool, user_id: str
+    db: Session, actor: models.User, is_super: bool, user_id: str,
+    actor_principal=None,
 ) -> UserOut:
     """Soft-деактивация; самодеактивация запрещена (деактивирует другой СА, US-004).
 
@@ -108,5 +110,9 @@ def deactivate_user(
         # FR-012/US-004 ш.4: единственный носитель review в группе →
         # незакрываемая служебная задача «Передать право ревью»
         _create_review_transfer_tasks(db, u)
+        # US-049 ш.1 (FR-140, LLD §11 user.deactivate)
+        if actor_principal is not None:
+            audit_log(db, actor_principal, "user.deactivate", "user", u.id,
+                      details={"display_name": u.display_name})
     commit_rights(db)
     return to_out(u)

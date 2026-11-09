@@ -56,8 +56,10 @@ async def _lifespan(app: FastAPI):
 
 def register_exception_handlers(app: FastAPI) -> None:
     from fastapi.exceptions import RequestValidationError
-    from fastapi import Request
+    from fastapi import Request, HTTPException
     from fastapi.responses import JSONResponse
+
+    from app.use_cases.errors import DomainError
 
     def problem(
         status: int,
@@ -78,6 +80,21 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "code": code,
                 **({"params": params} if params else {}),
             },
+        )
+
+    @app.exception_handler(DomainError)
+    async def domain_handler(request: Request, exc: DomainError):
+        # Бизнес-ошибки use-cases → problem+json с кодом LLD §12.2
+        return problem(exc.status, exc.code, exc.title, exc.detail, exc.params)
+
+    @app.exception_handler(HTTPException)
+    async def http_handler(request: Request, exc: HTTPException):
+        # Ошибки фреймворка (404 маршрута, 405 и т.п.) — тоже problem+json (LLD §12.1)
+        return problem(
+            exc.status_code,
+            "HTTP_ERROR" if exc.status_code < 500 else "INTERNAL",
+            "Ошибка запроса" if exc.status_code < 500 else "Внутренняя ошибка сервера",
+            exc.detail if isinstance(exc.detail, str) else None,
         )
 
     @app.exception_handler(RequestValidationError)

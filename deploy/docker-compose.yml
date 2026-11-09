@@ -50,8 +50,12 @@ services:
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
-      KC_HOSTNAME: localhost
-      KC_HOSTNAME_STRICT: "false"
+      # Hostname v2: issuer фиксирован (http://localhost:8080/realms/kb). Строгий режим
+      # обязателен: при strict=false hostname резолвится из Host-заголовка, и introspection
+      # через внутренний URL (Host: keycloak:8080) даёт iss-несоответствие → active:false
+      # (keycloak/keycloak#15694).
+      KC_HOSTNAME: http://localhost:8080
+      KC_HOSTNAME_STRICT: "true"
       KC_PROXY_HEADERS: xforwarded
       # Переменные для подстановки ${VAR} в realm-kb-test.json при импорте
       KB_API_CLIENT_SECRET: ${KB_API_CLIENT_SECRET}

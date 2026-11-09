@@ -15,9 +15,9 @@ def update_role(
     """Правка состава/названия; на уже созданные снапшоты не влияет (FR-100) — этап 4."""
     require_super(is_super)
     role = get_role_or_404(db, role_id)
-    if role.is_virtual_all_users and permissions is not None:
+    if role.is_virtual_all_users and (permissions is not None or name is not None):
         raise domain_rule_violation(
-            409, f"Виртуальная роль «{VIRTUAL_ALL_USERS_NAME}» не имеет состава прав"
+            409, f"Виртуальная роль «{VIRTUAL_ALL_USERS_NAME}» не редактируется"
         )
     if name is not None and name != role.name:
         if db.execute(

@@ -79,3 +79,30 @@ def test_assign_role_idempotent(db):
         select(models.UserRole).where(models.UserRole.user_id == principal.user_id)
     ).scalars().all()
     assert len(links) == 1
+
+
+def test_list_users_clamps_per_page(db):
+    """FR-131: per_page=<1 и >200 зажимается в границы; page<1 → 1."""
+    from tests.conftest import _make_principal
+    from app.use_cases.users.list_users import list_users
+
+    _make_principal(db, "Юзер пагинации")
+    p = list_users(db, is_super=True, page=0, per_page=0)
+    assert (p.page, p.per_page) == (1, 1)
+    p2 = list_users(db, is_super=True, page=1, per_page=9999)
+    assert p2.per_page == 200
+
+
+def test_virtual_role_not_renamable(db):
+    """FR-009: «Все пользователи» не редактируется ни по составу, ни по имени."""
+    from app.use_cases.errors import domain_rule_violation as drv  # noqa
+    from app.use_cases.roles.constants import VIRTUAL_ALL_USERS_NAME
+
+    virtual = db.execute(
+        select(models.Role).where(models.Role.is_virtual_all_users.is_(True))
+    ).scalar_one()
+    with pytest.raises(DomainError) as e1:
+        update_role(db, is_super=True, role_id=str(virtual.id), name="Другое", permissions=None)
+    with pytest.raises(DomainError) as e2:
+        update_role(db, is_super=True, role_id=str(virtual.id), name=None, permissions=[])
+    assert e1.value.status == e2.value.status == 409

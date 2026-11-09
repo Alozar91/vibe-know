@@ -21,6 +21,26 @@ def main() -> None:
     configure_logging(settings.log_level)
     log.info("worker.starting", queues=["default"])
 
+    # Reconcile очереди (LLD §9): queued-задачи из БД перезапускаются в брокер
+    # (постановка до коммита/сбой брокера/рестарт worker — task не потерян).
+    def _reconcile():
+        import time
+
+        for attempt in range(10):
+            try:
+                time.sleep(3)
+                from app.worker.tasks import files_reconcile
+
+                # Прямой вызов тела задачи (без Celery-обёртки apply())
+                res = files_reconcile.run()
+                if res.get("restarted"):
+                    log.info("worker.reconcile", restarted=res["restarted"])
+                return
+            except Exception as e:  # noqa: BLE001 — брокер ещё не готов
+                log.warning("worker.reconcile.retry", attempt=attempt, error=str(e))
+
+    threading.Thread(target=_reconcile, daemon=True).start()
+
     threading.Thread(target=_serve_metrics, daemon=True).start()
 
     celery_app.worker_main(

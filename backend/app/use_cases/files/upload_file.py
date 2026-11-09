@@ -94,7 +94,12 @@ def upload_file(
     ).scalar_one_or_none()
 
     if fo is None:
-        fo = _create_file_object(db, filename, mime, sha_hex, data)
+        fo, ref = _create_file_object(db, filename, mime, sha_hex, data)
+        if ref:
+            # after-commit постановка в брокер (см. _enqueue_scan)
+            if not hasattr(db, "_pending_task_refs"):
+                db._pending_task_refs = []
+            db._pending_task_refs.append(ref)
     else:
         # found: привязка по состоянию (§6.2); повторный антивирус не выполняется
         if fo.scan_state == "infected":
@@ -164,7 +169,20 @@ def upload_file(
     # Фиксация версии: замена файла — новый file_id (§5.1, FR-147)
     commit_version(db, m, user)
 
+    pending_enqueue = [ref for ref in (getattr(db, "_pending_task_refs", None) or [])]
     db.commit()
+
+    # Постановка в брокер — после коммита (задача видит зафиксированные строки);
+    # сбой брокера не мешает ответу: task остаётся queued, подхватит reconcile (§9)
+    if pending_enqueue:
+        from app.worker.tasks import files_scan
+
+        for _kind, task_id, file_id in pending_enqueue:
+            try:
+                files_scan.apply_async(args=[task_id, file_id])
+            except Exception:
+                pass
+
     return {
         "id": str(m.id),
         "version": m.version,
@@ -175,10 +193,26 @@ def upload_file(
     }
 
 
+def _enqueue_scan(db: Session, fo: models.FileObject) -> tuple:
+    """system_tasks queued (NFR-014, источник истины). Celery — ПОСЛЕ коммита
+    (гонка: worker читает БД до фиксации INSERT → «missing» → вечный pending).
+    Возвращает кортеж-ссылку для after-commit отправки."""
+    task = models.SystemTask(
+        task_type="antivirus", object_type="file", object_id=fo.id, state="queued"
+    )
+    db.add(task)
+    db.flush()
+    return ("antivirus", str(task.id), str(fo.id))
+
+
 def _create_file_object(
     db: Session, filename: str, mime: str, sha_hex: str, data: bytes
-) -> models.FileObject:
-    """Not found: S3 PUT + INSERT pending_scan + задача files.scan (§6.2 п.2)."""
+) -> tuple:
+    """Not found: S3 PUT + INSERT pending_scan + system_tasks queued (§6.2 п.2).
+
+    Возвращает (FileObject, ref|None); ref — кортеж-ссылка (kind, task_id,
+    file_id) для after-commit отправки в брокер.
+    """
     silo.put_object(silo.cas_key(sha_hex), data, content_type=mime)
     fo = models.FileObject(
         cas_key=sha_hex,  # существующая модель: cas_key = sha256 (UNIQUE, этап 4)
@@ -212,31 +246,9 @@ def _create_file_object(
                 status=409, code="FILE_PENDING_SCAN", title="Файл ещё проверяется",
                 detail="Файл проходит антивирусную проверку; повторите позже",
             )
-        return fo
-    _enqueue_scan(db, fo)
-    return fo
-
-
-def _enqueue_scan(db: Session, fo: models.FileObject) -> None:
-    """system_tasks (NFR-014, источник истины) + очередь Celery — транспорт (§9)."""
-    task = models.SystemTask(
-        task_type="antivirus", object_type="file", object_id=fo.id, state="queued"
-    )
-    db.add(task)
-    db.flush()
-    from app.worker.tasks import files_scan
-
-    try:
-        # Ретраи: 5 попыток, экспоненциально 30 с → ×2 (LLD §9)
-        files_scan.apply_async(
-            args=[str(task.id), str(fo.id)],
-            retry=True,
-            retry_policy={"max_retries": 5, "interval_start": 30, "interval_step": 2},
-        )
-    except Exception:
-        # Брокер недоступен: задача остаётся queued в БД, подхватывается
-        # reconcile при старте worker (LLD §9)
-        pass
+        return fo, None
+    ref = _enqueue_scan(db, fo)
+    return fo, ref
 
 
 def _decode_text(data: bytes) -> str | None:

@@ -51,39 +51,38 @@ def get_object_stream(key: str, range_header: str | None = None):
     """S3 GET с опциональным Range (FR-062); возвращает (body, status_code, headers).
 
     body поддерживает read()/iter_chunks(); вызывающий закрывает.
+    Возвраты: None, 404 — объекта нет; None, 416 — Range не удовлетворим (§6.4).
     """
     kwargs = {"Bucket": get_settings().s3_bucket, "Key": key}
     if range_header:
         kwargs["Range"] = range_header
     try:
         resp = _s3().get_object(**kwargs)
-    except _s3().exceptions.ClientError as e:  # noqa: F821 — вычисляется в рантайме
-        code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
-        if code in ("NoSuchKey", "404"):
+    except Exception as e:  # noqa: BLE001 — botocore.exceptions.ClientError
+        err = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+        if err in ("NoSuchKey", "404", "NotFound"):
             return None, 404, {}
-        if code in ("InvalidRange", "RangeNotSatisfiable", "416"):
+        if err in ("InvalidRange", "InvalidObjectState", "416"):
             return None, 416, {}
         raise
+    status = 206 if range_header else 200
     headers = {
         "Content-Type": resp.get("ContentType", "application/octet-stream"),
         "Content-Length": str(resp.get("ContentLength", "")),
-        "ETag": resp.get("ETag", ""),
-        "Last-Modified": resp.get("LastModified").isoformat() if resp.get("LastModified") else "",
-        "AcceptRanges": "bytes",
         "ContentRange": resp.get("ContentRange", ""),
     }
-    return resp["Body"], 200, headers
+    return resp["Body"], status, headers
 
 
 def head_object(key: str) -> dict | None:
-    """HEAD объекта; None — нет объекта (проверка PDF-кэша)."""
+    """HEAD объекта; None — нет объекта (проверка PDF-кэша, §6.3)."""
+    from botocore.exceptions import ClientError
+
     try:
         return _s3().head_object(Bucket=get_settings().s3_bucket, Key=key)
-        # noqa — botocore.exceptions.ClientError ловим по имени без импорта
-    except Exception as e:  # noqa: BLE001 — botocore не даёт стабильного класса до вызова
-        if type(e).__name__ == "ClientError" and getattr(e, "response", {}).get(
-            "Error", {}
-        ).get("Code", "") in ("404", "NoSuchKey", "NotFound"):
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code", "")
+        if code in ("404", "NoSuchKey", "NotFound"):
             return None
         raise
 

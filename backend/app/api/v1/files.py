@@ -1,12 +1,11 @@
 # Files — транспорт (LLD §12.3, §6.2–6.4). Логика: use_cases/files/*.
 # Отдача — api-стриминг [уточнение LLD]: единая точка авторизации, браузер
 # к silo не обращается. Скачивание — только scan_state='ready' (FR-058).
-from fastapi import APIRouter, Depends, Header, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, Header, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUserDep
 from app.db.engine import get_db
-from app.use_cases.common import parse_uuid
 
 router = APIRouter(tags=["files"])
 
@@ -64,7 +63,15 @@ async def download_file_ep(
     fo = db.execute(
         select_file(m.current_file_id)
     ).scalar_one_or_none()
-    if fo is None or fo.scan_state != "ready":
+    if fo is None:
+        raise not_found("Файл не найден")
+    if fo.scan_state == "infected":
+        # LLD §12.2: заражённый файл — FILE_BLOCKED 409
+        raise DomainError(
+            status=409, code="FILE_BLOCKED", title="Файл заблокирован",
+            detail="Файл не прошёл антивирусную проверку и недоступен",
+        )
+    if fo.scan_state != "ready":
         # FR-058: отдача только после проверки (US-011 шаг 2)
         raise DomainError(
             status=409, code="FILE_PENDING_SCAN", title="Файл ещё проверяется",
@@ -80,13 +87,21 @@ async def download_file_ep(
               details={"file_id": str(fo.id), "filename": fo.filename})
     db.commit()
 
+    from urllib.parse import quote
+
+    ascii_name = _safe_name(fo.filename).encode("ascii", "ignore").decode("ascii").strip() or "file"
+    utf8_name = quote(_safe_name(fo.filename))
+
     from fastapi.responses import StreamingResponse
 
     return StreamingResponse(
         _stream_body(body), status_code=st,
         media_type=headers.get("Content-Type", fo.mime_type),
         headers={
-            "Content-Disposition": f'attachment; filename="{_safe_name(fo.filename)}"',
+            # RFC 5987/6266: ascii-fallback + filename* для кириллицы
+            "Content-Disposition": (
+                f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{utf8_name}"
+            ),
             "Accept-Ranges": "bytes",
             **({"Content-Range": headers["ContentRange"]} if headers.get("ContentRange") else {}),
         },
@@ -191,6 +206,7 @@ def _stream_body(body):
 
 
 def select_file(file_id):
+    """SELECT FileObject по id (file_id уже uuid.UUID из materials.current_file_id)."""
     from sqlalchemy import select
 
     from app.db import models

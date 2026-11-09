@@ -149,9 +149,12 @@ def restore_version(
         m.signatory_id = None  # FR-084
         m.signatory_at = None
     elif status_v == "in_review":
-        # FR-085/US-042 шаг 5: уведомление material_changed_on_review — этап 9
+        # FR-085/US-042 шаг 5: событие в транзакции (LLD §8.1, 7.7)
         audit_log(db, user, "material.update", "material", m.id,
                   details={"on_review": True, "restore_version": number})
+        from app.use_cases.notifications.events import publish_event
+
+        publish_event(db, "material_changed_on_review", m.id, user.user_id)
     else:
         audit_log(db, user, "material.update", "material", m.id,
                   details={"restore_version": number})
@@ -169,6 +172,19 @@ def restore_version(
     from app.use_cases.materials.search_common import update_search_vector
 
     update_search_vector(db, m)
+
+    # Этап 9: восстановление файла/текста мастера — «мастер изменён»
+    # по критерию (US-042 ш.5, FR-038, 16.1-111)
+    from app.use_cases.materials.update_material import (
+        _is_master_with_children,
+        _master_change_criterion_allows,
+    )
+    from app.use_cases.notifications.events import publish_event
+
+    if _is_master_with_children(db, m) and _master_change_criterion_allows(
+        db, content_v := True, meta_changed=False
+    ):
+        publish_event(db, "master_changed", m.id, user.user_id)
 
     db.commit()
     return {"id": str(m.id), "version": m.version, "restored_from": number}

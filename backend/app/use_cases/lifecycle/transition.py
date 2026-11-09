@@ -242,6 +242,28 @@ def transition(
         db, user, "material.status_change", "material", m.id,
         details={"from": from_status, "to": to_status},
     )
+
+    # --- Этап 9: события уведомлений в транзакции (LLD §8.1, FR-134) ---
+    # Специализированное событие для покрытого перехода; для прочих — общий
+    # status_changed (создаётся всегда, диспетчер применяет конфиг триггера:
+    # отключён → processed без уведомлений). Специализированные имеют приоритет
+    # и исключают срабатывание общего для этих переходов (FR-134, двойных нет).
+    from app.use_cases.notifications.events import publish_event, specialized_event_for
+
+    event_type = specialized_event_for(from_status, to_status)
+    if event_type == "material_archived" and cascade_ids:
+        # каскадная архивация: мастер-материал — material_archived,
+        # каждый подчинённый — отдельное child_auto_archived (16.1-116)
+        publish_event(db, "material_archived", m.id, user.user_id)
+        for cid in cascade_ids:
+            publish_event(db, "child_auto_archived",
+                          uuid.UUID(cid) if isinstance(cid, str) else cid, user.user_id)
+    elif event_type is not None:
+        publish_event(db, event_type, m.id, user.user_id)
+    else:
+        publish_event(db, "status_changed", m.id, user.user_id,
+                      payload={"from": from_status, "to": to_status})
+
     db.commit()
     return {
         "id": str(m.id),

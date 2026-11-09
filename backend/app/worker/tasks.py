@@ -89,9 +89,11 @@ def files_scan(self, task_id: str, file_id: str) -> dict:
             # Офисный mime → files.convert (§6.3); пост-обработка после commit
             _maybe_convert(fo)
         else:
-            # Прямое уведомление file_blocked (FR-058) — этап 9; аудит — системный
+            # Прямое уведомление file_blocked (FR-058, LLD §8.1): вне триггеров,
+            # получатели — автор материала + все СА; инициатор — система
             _audit_system(db, "file.scan", fo,
                           details={"result": "infected"})
+            _notify_file_blocked(fo)
         return {"file_id": file_id, "result": fo.scan_state}
     except Exception as e:
         db.rollback()
@@ -118,6 +120,50 @@ def _audit_system(db, action: str, fo, details: dict) -> None:
         actor_user_id=None, actor_is_service=True, action=action,
         object_type="file", object_id=fo.id, details=details,
     ))
+
+
+def _notify_file_blocked(fo: models.FileObject) -> None:
+    """Прямое уведомление file_blocked (FR-058, LLD §8.1 п.2): создаётся
+    конвейером напрямую в notifications (вне триггеров); получатели —
+    автор материала (fact_author по materials.author_id) и все СА
+    (носители шаблона «Системный администратор»); инициатор — система."""
+    with get_session_factory()() as db:
+        # Материал файла: связь через materials.current_file_id (текущая версия)
+        m = db.execute(
+            select(models.Material).where(models.Material.current_file_id == fo.id)
+        ).scalars().first()
+        recipients: list[models.User] = []
+        if m is not None and m.author_id is not None:
+            author = db.execute(
+                select(models.User).where(models.User.id == m.author_id)
+            ).scalar_one_or_none()
+            if author is not None:
+                recipients.append(author)
+        # Все СА — носители шаблона «Системный администратор» (FR-104)
+        sa_role = db.execute(
+            select(models.Role).where(models.Role.name == "Системный администратор")
+        ).scalar_one_or_none()
+        if sa_role is not None:
+            sas = db.execute(
+                select(models.User)
+                .join(models.UserRole, models.UserRole.user_id == models.User.id)
+                .where(models.UserRole.role_id == sa_role.id)
+            ).scalars().all()
+            recipients.extend(sas)
+
+        seen = set()
+        for u in recipients:
+            if u.id in seen or u.is_deactivated or u.is_service:
+                continue  # FR-139, FR-013
+            seen.add(u.id)
+            db.add(models.Notification(
+                recipient_id=u.id,
+                event_type="file_blocked",
+                material_id=m.id if m is not None else None,
+                channel="in_app",
+                dedup_key=f"file_blocked:{fo.id}:{u.id}",
+            ))
+        db.commit()
 
 
 @celery_app.task(bind=True, name="files.convert", max_retries=CONVERT_MAX_RETRIES)
@@ -348,3 +394,251 @@ def analytics_rollup() -> dict:
 
     log.info("analytics_rollup.done", rolled_days=rolled_days, deleted=deleted_events)
     return {"rolled_days": rolled_days, "deleted": deleted_events}
+
+
+# ==========================================================================
+# Этап 9: уведомления (LLD §8, §9; FR-134–139)
+# ==========================================================================
+
+DISPATCH_INTERVAL_S = 15  # диспетчер ≤ 15 с (NFR-007: in-app ≤ 30 с)
+EMAIL_MAX_RETRIES = 5  # §9: 5 попыток, экспоненциально
+
+
+@celery_app.task(name="notifications.dispatch")
+def notifications_dispatch() -> dict:
+    """Диспетчер (§8.2): события → получатели → анти-шум → notifications.
+
+    Вызывается расписанием (beat, 15 с); повторный прогон по processed=false
+    безопасен (идемпотентность §9). Дедуп dedup_key исключает дубли.
+    """
+    from app.use_cases.notifications.dispatch import dispatch_events
+
+    with get_session_factory()() as db:
+        if db.bind.dialect.name == "sqlite":
+            return {"events": 0, "skipped": "sqlite"}
+        stats = dispatch_events(db)
+    if stats["events"]:
+        log.info("notifications.dispatch", **stats)
+    # Email-отправка: если SMTP настроен, ставим задачу отправки (§9)
+    if stats.get("email_created"):
+        notifications_email.apply_async()
+    return stats
+
+
+@celery_app.task(bind=True, max_retries=EMAIL_MAX_RETRIES, name="notifications.email")
+def notifications_email(self) -> dict:
+    """Email-канал (§8.2, §9): отправка уведомлений с email_state='queued'.
+
+    Адрес — из users.email_cache (16.1-119); при пустом кэше — фолбэк Admin
+    API (§10, этап 10); пустой адрес → email не отправляется, in-app доставлен
+    (US-040 A3, FR-151). Ретраи экспоненциально (§9); SMTP ненастроен →
+    задачи не создаются диспетчером (US-040 A1), здесь — защита.
+    """
+    import smtplib
+    from email.message import EmailMessage
+
+    from app.config import get_settings
+    from app.use_cases.notifications.dispatch import get_setting, smtp_configured
+
+    settings = get_settings()
+    sent = failed = skipped = 0
+    with get_session_factory()() as db:
+        if db.bind.dialect.name == "sqlite":
+            return {"sent": 0, "skipped": "sqlite"}
+
+        # US-040 A1: SMTP не настроен → канал отключён; queued-строки не создаются,
+        # но если остались от прошлой конфигурации — помечаем failed (канал off)
+        if not smtp_configured(db):
+            db.execute(
+                update(models.Notification)
+                .where(models.Notification.email_state == "queued")
+                .values(email_state="failed", )
+            )
+            db.commit()
+            return {"sent": 0, "result": "smtp_not_configured"}
+
+        host = str(get_setting(db, "smtp_host", "") or "").strip()
+        port = int(get_setting(db, "smtp_port", 25) or 25)
+        sender = str(get_setting(db, "smtp_from", "kb@example.local") or "kb@example.local")
+        use_tls = bool(get_setting(db, "smtp_tls", False))
+
+        rows = list(db.execute(
+            select(models.Notification)
+            .where(models.Notification.email_state == "queued")
+            .order_by(models.Notification.created_at)
+            .limit(100)
+        ).scalars().all())
+
+        if not rows:
+            return {"sent": 0}
+
+        def _subject_and_body(n: models.Notification, name: str, m_name: str | None):
+            titles = {
+                "material_sent_to_review": "Материал отправлен на проверку",
+                "material_rejected": "Материал отклонён",
+                "material_archived": "Материал заархивирован",
+                "child_auto_archived": "Подчинённый материал архивирован автоматически",
+                "master_changed": "Мастер-материал изменён",
+                "material_changed_on_review": "Материал изменён на проверке",
+                "status_changed": "Изменение статуса материала",
+                "file_blocked": "Файл заблокирован антивирусом",
+            }
+            t = titles.get(n.event_type, "Уведомление")
+            subj = f"[База знаний] {t}"
+            body = f"{t}"
+            if m_name:
+                body += f": {m_name}"
+            return subj, body
+
+        try:
+            server: smtplib.SMTP | None = smtplib.SMTP(host, port, timeout=10)
+            if use_tls:
+                server.starttls()
+        except Exception as e:
+            # Ретрай экспоненциально (§9); потеря письма ≠ потеря данных (US-040 A2)
+            try_count = self.request.retries + 1
+            if try_count <= EMAIL_MAX_RETRIES:
+                raise self.retry(exc=e, countdown=30 * (2 ** (try_count - 1)))
+            for n in rows:
+                n.email_state = "failed"
+            db.commit()
+            return {"sent": 0, "failed": len(rows), "error": str(e)}
+
+        try:
+            for n in rows:
+                u = db.execute(
+                    select(models.User).where(models.User.id == n.recipient_id)
+                ).scalar_one_or_none()
+                m_name = None
+                if n.material_id is not None:
+                    m_name = db.execute(
+                        select(models.Material.name).where(models.Material.id == n.material_id)
+                    ).scalar_one_or_none()
+                if u is None:
+                    n.email_state = "failed"
+                    failed += 1
+                    continue
+                # FR-139/FR-013: деактивированные/сервисные не доставляются
+                if u.is_deactivated or u.is_service:
+                    n.email_state = "failed"
+                    skipped += 1
+                    continue
+                # US-040 A3: нет email в кэше — in-app доставлен, email нет (FR-151)
+                email = (u.email_cache or "").strip()
+                if not email:
+                    n.email_state = "failed"
+                    skipped += 1
+                    continue
+                subj, body = _subject_and_body(n, u.display_name, m_name)
+                msg = EmailMessage()
+                msg["Subject"] = subj
+                msg["From"] = sender
+                msg["To"] = email
+                msg.set_content(body, charset="utf-8")
+                try:
+                    server.send_message(msg)
+                    n.email_state = "done"
+                    sent += 1
+                except Exception:
+                    n.email_state = "failed"
+                    failed += 1
+            db.commit()
+        finally:
+            try:
+                server.quit()
+            except Exception:
+                pass
+    log.info("notifications.email.done", sent=sent, failed=failed, skipped=skipped)
+    return {"sent": sent, "failed": failed, "skipped": skipped}
+
+
+@celery_app.task(name="notifications.digest")
+def notifications_digest() -> dict:
+    """Email-дайджест (FR-138, §8.2): периодическая сводка непрочитанных
+    одним письмом; вошедшие помечаются included_in_digest_at (11.3).
+
+    Интервал — параметр digest_interval_minutes (§2.5; NULL — отключён);
+    SMTP ненастроен → дайджест не формируется (US-040 A1).
+    """
+    import smtplib
+    from email.message import EmailMessage
+
+    from app.config import get_settings
+    from app.use_cases.notifications.dispatch import get_setting, smtp_configured
+
+    settings = get_settings()
+    with get_session_factory()() as db:
+        if db.bind.dialect.name == "sqlite":
+            return {"digests": 0, "skipped": "sqlite"}
+        if not smtp_configured(db):
+            return {"digests": 0, "result": "smtp_not_configured"}
+        interval = get_setting(db, "digest_interval_minutes", None)
+        if interval is None:
+            return {"digests": 0, "result": "digest_disabled"}
+
+        host = str(get_setting(db, "smtp_host", "") or "").strip()
+        port = int(get_setting(db, "smtp_port", 25) or 25)
+        sender = str(get_setting(db, "smtp_from", "kb@example.local") or "kb@example.local")
+
+        # Непрочитанные, ещё не вошедшие в дайджест, по получателям (§8.2)
+        rows = list(db.execute(
+            select(models.Notification)
+            .where(
+                models.Notification.read_at.is_(None),
+                models.Notification.included_in_digest_at.is_(None),
+                models.Notification.email_state == "done",  # уже шло событием
+            )
+            .order_by(models.Notification.created_at)
+        ).scalars().all())
+        if not rows:
+            return {"digests": 0}
+
+        by_user: dict = {}
+        for n in rows:
+            by_user.setdefault(n.recipient_id, []).append(n)
+
+        digests = 0
+        try:
+            server = smtplib.SMTP(host, port, timeout=10)
+        except Exception as e:
+            log.warning("notifications.digest.smtp_failed", error=str(e))
+            return {"digests": 0, "error": str(e)}
+
+        try:
+            for uid, notifs in by_user.items():
+                u = db.execute(
+                    select(models.User).where(models.User.id == uid)
+                ).scalar_one_or_none()
+                email = (u.email_cache or "").strip() if u else ""
+                if not email or (u.is_deactivated or u.is_service):
+                    continue  # FR-139, FR-013, US-040 A3
+                lines = []
+                for n in notifs:
+                    m_name = None
+                    if n.material_id is not None:
+                        m_name = db.execute(
+                            select(models.Material.name).where(models.Material.id == n.material_id)
+                        ).scalar_one_or_none()
+                    lines.append(f"- {n.event_type}: {m_name or '—'}")
+                msg = EmailMessage()
+                msg["Subject"] = f"[База знаний] Дайджест уведомлений ({len(notifs)})"
+                msg["From"] = sender
+                msg["To"] = email
+                msg.set_content(
+                    "Непрочитанные уведомления:\n" + "\n".join(lines), charset="utf-8"
+                )
+                try:
+                    server.send_message(msg)
+                    for n in notifs:
+                        n.included_in_digest_at = _now()
+                    digests += 1
+                except Exception:
+                    continue  # ретрай — следующий прогон (NFR-014)
+            db.commit()
+        finally:
+            try:
+                server.quit()
+            except Exception:
+                pass
+    log.info("notifications.digest.done", digests=digests)
+    return {"digests": digests}

@@ -48,6 +48,9 @@ def main() -> None:
             "worker",
             "--loglevel=INFO",
             "--concurrency=2",
+            # Beat встроен в worker (single-node, §9): расписания dispatch ≤15 с,
+            # digest, ежедневные maintenance (этап 10)
+            "--beat",
         ]
     )
 

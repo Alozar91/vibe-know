@@ -551,3 +551,94 @@ class AuditEntry(Base):
     object_type: Mapped[str] = mapped_column(Text, nullable=False)
     object_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
     details: Mapped[dict | None] = mapped_column(JSONB().with_variant(JSON, "sqlite"), nullable=True)
+
+
+# ==========================================================================
+# Этап 6: файлы и версии (LLD §5, §6, §9; FR-055–064, FR-144–148, NFR-014)
+# ==========================================================================
+
+class MaterialVersion(Base):
+    """material_versions (LLD §5.1, FR-144–148): снапшот версии материала.
+
+    Снапшот: {"file_id", "text", "name", "type_id",
+    "attributes": [{attribute_id, values[]}], "tags"} — без master_id и прав
+    (FR-144). Номер с 1, уникален в материале (§2.4). Бессрочно (FR-147).
+    """
+
+    __tablename__ = "material_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=new_uuid)
+    material_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("materials.id", ondelete="RESTRICT"), nullable=False
+    )
+    number: Mapped[int] = mapped_column(nullable=False)  # с 1, UNIQUE в материале (§5.1)
+    snapshot: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False
+    )
+    author_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("uq_material_versions_number", "material_id", "number", unique=True),
+    )
+
+
+class TaskState(str, enum.Enum):
+    """task_state (LLD §2.1, NFR-014)."""
+
+    queued = "queued"
+    running = "running"
+    done = "done"
+    failed = "failed"
+
+
+class TaskType(str, enum.Enum):
+    """task_type (LLD §2.1): на этапах 6/9/10 добавляются обработчики."""
+
+    antivirus = "antivirus"
+    conversion = "conversion"
+    email = "email"
+    digest = "digest"
+    audit_cleanup = "audit_cleanup"
+    inapp_cleanup = "inapp_cleanup"
+    analytics_rollup = "analytics_rollup"
+    cas_gc = "cas_gc"
+    cas_reconcile = "cas_reconcile"
+    keycloak_sync = "keycloak_sync"
+    integrity_check = "integrity_check"
+    fts_rebuild = "fts_rebuild"
+
+
+class SystemTask(TimestampMixin, Base):
+    """system_tasks (LLD §2.2, §9, NFR-014): источник истины по состояниям задач.
+
+    Брокер Valkey — транспорт; восстановление после сбоя — задачи в queued
+    перезапускаются при старте worker (reconcile очереди из БД).
+    """
+
+    __tablename__ = "system_tasks"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=new_uuid)
+    task_type: Mapped[str] = mapped_column(String(32), nullable=False)  # task_type (§2.1)
+    object_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    object_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
+    state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="queued", server_default="queued"
+    )  # task_state
+    attempts: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scheduled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        # B-tree (task_type, state) — мониторинг очередей (NFR-019, §2.4)
+        Index("ix_system_tasks_type_state", "task_type", "state"),
+        Index("ix_system_tasks_object", "object_type", "object_id"),
+    )

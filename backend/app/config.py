@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     s3_access_key: str = ""
     s3_secret_key: str = ""
 
+    # Gotenberg (конвертация офисных форматов, LLD §6.3)
+    gotenberg_url: str = "http://localhost:3000"
+
     # Keycloak (OIDC, introspection — LLD §10)
     oidc_issuer: str = "http://localhost:8080/realms/kb"
     oidc_introspection_url: str = "http://localhost:8080/realms/kb/protocol/openid-connect/token/introspect"

@@ -190,5 +190,11 @@ def update_material(
         m.version += 1
         m.updated_at = now
 
+        # Фиксация версии (§5.1, FR-144): снапшот-сравнение с последней версией;
+        # реальное изменение контента/метаданных → новая строка material_versions
+        from app.use_cases.materials.versions import commit_version
+
+        commit_version(db, m, user)
+
     db.commit()
     return {"id": str(m.id), "version": m.version}

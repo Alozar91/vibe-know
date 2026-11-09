@@ -107,6 +107,7 @@ def create_material(
         last_editor_id=user.user_id,
         text_content=text_content,
         version=1,
+        updated_at=now,  # FR-026: даты создания/изменения фиксируются при создании
     )
     db.add(m)
     db.flush()

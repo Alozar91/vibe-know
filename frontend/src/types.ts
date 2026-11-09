@@ -69,6 +69,26 @@ export interface Snapshot {
   entries: { permission: string; state: 'allow' | 'deny' }[]
 }
 
+// Этап 5: жизненный цикл (§4.1, FR-070)
+export interface TransitionInfo {
+  id: string
+  from_status: Material['status'] | null // null = «*»
+  to_status: Material['status']
+  is_protected: boolean
+  permissions: string[]
+  allowed: boolean
+  need_cascade: boolean
+  children_count: number
+}
+
+export interface StatusLogEntry {
+  from_status: Material['status'] | null
+  to_status: Material['status']
+  user_id: string
+  user_display_name: string
+  created_at: string
+}
+
 export const STATUS_RU: Record<Material['status'], string> = {
   draft: 'Черновик',
   in_review: 'На проверке',

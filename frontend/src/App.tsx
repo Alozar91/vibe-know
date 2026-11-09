@@ -7,8 +7,9 @@ import MaterialsBrowser from './MaterialsBrowser'
 import MaterialCardView from './MaterialCard'
 import Sections from './Sections'
 import PermissionsEditor from './PermissionsEditor'
+import TransitionMatrix from './TransitionMatrix'
 
-type View = { kind: 'browser' } | { kind: 'sections' } | { kind: 'material'; id: string }
+type View = { kind: 'browser' } | { kind: 'sections' } | { kind: 'matrix' } | { kind: 'material'; id: string }
 
 export default function App() {
   const [ready, setReady] = useState(false)
@@ -65,6 +66,12 @@ export default function App() {
                 style={view.kind === 'sections' ? activeNav : {}}>
           Разделы
         </button>
+        {me?.is_super && (
+          <button onClick={() => setView({ kind: 'matrix' })}
+                  style={view.kind === 'matrix' ? activeNav : {}}>
+            Матрица переходов
+          </button>
+        )}
       </nav>
 
       {view.kind === 'browser' && (
@@ -73,6 +80,7 @@ export default function App() {
       {view.kind === 'sections' && (
         <Sections onOpenMaterial={(id) => setView({ kind: 'material', id })} refreshToken={refreshToken} />
       )}
+      {view.kind === 'matrix' && <TransitionMatrix />}
       {view.kind === 'material' && (
         <>
           <MaterialCardView

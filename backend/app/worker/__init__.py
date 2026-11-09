@@ -19,6 +19,19 @@ def make_celery() -> Celery:
         worker_prefetch_multiplier=1,
         task_time_limit=3600,
         timezone="UTC",
+        # Расписания (LLD §9): dispatch ≤ 15 с (NFR-007), digest — ежечасный
+        # запуск с проверкой digest_interval_minutes внутри (§8.2);
+        # ежедневные maintenance — этап 10.
+        beat_schedule={
+            "notifications-dispatch": {
+                "task": "notifications.dispatch",
+                "schedule": 15.0,
+            },
+            "notifications-digest": {
+                "task": "notifications.digest",
+                "schedule": 3600.0,
+            },
+        },
     )
     return app
 

@@ -768,3 +768,148 @@ class SystemSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+# ==========================================================================
+# Этап 9: уведомления (LLD §2.2 notifications/notification_events/
+# trigger_configs, §8; FR-134–139)
+# ==========================================================================
+
+class NotificationEventType(str, enum.Enum):
+    """event_type (LLD §2.1, 11.1, FR-134)."""
+
+    material_sent_to_review = "material_sent_to_review"
+    material_rejected = "material_rejected"
+    material_archived = "material_archived"
+    child_auto_archived = "child_auto_archived"
+    master_changed = "master_changed"
+    material_changed_on_review = "material_changed_on_review"
+    status_changed = "status_changed"  # общий триггер
+    file_blocked = "file_blocked"  # прямое уведомление (FR-058, вне триггеров)
+
+
+class RecipientType(str, enum.Enum):
+    """recipient_type (LLD §2.1, 11.2, FR-135)."""
+
+    role = "role"
+    fact_author = "fact_author"
+    fact_signatory = "fact_signatory"
+    fact_last_editor = "fact_last_editor"
+    permission_holder = "permission_holder"
+
+
+class NotificationEvent(Base):
+    """notification_events (§8.1): публикуются в транзакции изменения
+    материала (§4.1), обрабатываются диспетчером (processed=false)."""
+
+    __tablename__ = "notification_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=new_uuid)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    material_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("materials.id", ondelete="CASCADE"), nullable=True
+    )
+    initiator_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    payload: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON (массив id подчинённых и др.)
+    processed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        # Диспетчер выбирает processed=false (§8.2); возраст — очистка (§8.2)
+        Index("ix_notification_events_processed", "processed", "created_at"),
+    )
+
+
+class Notification(Base):
+    """notifications (11.3, FR-136–138; §8): доставленные уведомления.
+
+    in-app — строки таблицы; email — задачи очереди (§9), email_state —
+    состояние доставки. dedup_key — анти-шум (§8.2, окно из параметра).
+    """
+
+    __tablename__ = "notifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=new_uuid)
+    recipient_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    material_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("materials.id", ondelete="CASCADE"), nullable=True
+    )
+    channel: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="in_app", server_default="in_app"
+    )
+    dedup_key: Mapped[str] = mapped_column(Text, nullable=False)
+    email_state: Mapped[str | None] = mapped_column(String(16), nullable=True)  # task_state
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    included_in_digest_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        # Лента получателя (FR-137) + анти-шум lookup (§8.2)
+        Index("ix_notifications_recipient", "recipient_id", "created_at"),
+        Index("ix_notifications_dedup", "dedup_key", "created_at"),
+    )
+
+
+class NotificationTrigger(Base):
+    """trigger_configs (11.2, FR-135): одна конфигурация на событие (UNIQUE)."""
+
+    __tablename__ = "notification_trigger_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=new_uuid)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    recipients: Mapped[str] = mapped_column(Text, nullable=False)  # JSON: [{type, role_id?, permission?}]
+
+    __table_args__ = (
+        # LLD §2.1: event_type UNIQUE (одна конфигурация на событие)
+        Index("uq_trigger_configs_event", "event_type", unique=True),
+    )
+
+
+class ServiceTaskType(str, enum.Enum):
+    """service_task_type (LLD §2.1, FR-012)."""
+
+    transfer_review_right = "transfer_review_right"
+
+
+class ServiceTask(Base):
+    """service_tasks (FR-012, US-004 ш.4): служебная задача СА.
+
+    Незакрываема, пока право не передано другому пользователю (US-004);
+    payload — {group_id, permission, user_id} (LLD §2.2).
+    """
+
+    __tablename__ = "service_tasks"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=new_uuid)
+    task_type: Mapped[str] = mapped_column(String(40), nullable=False)  # service_task_type
+    payload: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False
+    )  # {group_id, permission, user_id} (LLD §2.2)
+    state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="queued", server_default="queued"
+    )  # task_state
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        # Служебный раздел СА: открытые задачи (US-004 ш.4)
+        Index("ix_service_tasks_state", "state", "created_at"),
+    )

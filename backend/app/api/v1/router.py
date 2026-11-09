@@ -9,6 +9,7 @@ from app.api.v1 import (
     lifecycle,
     materials,
     me,
+    notifications,
     permissions,
     roles,
     search,
@@ -38,5 +39,7 @@ api_router.include_router(permissions.snapshot_router)
 api_router.include_router(lifecycle.router)
 api_router.include_router(lifecycle.rules_router)
 api_router.include_router(search.router)
+api_router.include_router(notifications.router)
+api_router.include_router(notifications.router_triggers)
 
-# Дальше по этапам: notifications (9), admin/audit/settings (10).
+# Дальше по этапам: admin/audit/settings (10).

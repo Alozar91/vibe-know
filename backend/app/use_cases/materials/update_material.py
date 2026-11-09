@@ -104,6 +104,7 @@ def update_material(
         # Валидатор 5 (FR-041): мастер/самостоятельный с подчинёнными в published —
         # контент не правится (иначе возврат в draft нарушил бы инвариант)
         _block_master_with_published_children(db, m)
+    _file_changed_this_tx = False  # файл правится отдельным эндпоинтом (этап 6)
 
     changed = False
     type_changed = False
@@ -180,9 +181,13 @@ def update_material(
             m.signatory_id = None  # FR-084: очистка подписанта
             m.signatory_at = None
         elif content_changed and status_v == "in_review":
-            # FR-085: аудит правки на ревью; уведомление material_changed_on_review — этап 9
+            # FR-085: аудит правки на ревью; событие уведомления в транзакции
+            # (LLD §8.1: material_changed_on_review → автор и рецензенты, 7.7)
             audit_log(db, user, "material.update", "material", m.id,
                       details={"on_review": True})
+            from app.use_cases.notifications.events import publish_event
+
+            publish_event(db, "material_changed_on_review", m.id, user.user_id)
         else:
             audit_log(db, user, "material.update", "material", m.id)
 
@@ -201,5 +206,44 @@ def update_material(
 
         update_search_vector(db, m)
 
+        # Этап 9: событие «мастер изменён» (LLD §8.1, FR-038, 16.1-111) —
+        # по критерию master_change_criterion ('content' | 'any')
+        if _is_master_with_children(db, m):
+            from app.use_cases.notifications.events import publish_event
+
+            content_params = content_changed or _file_changed_this_tx
+            if _master_change_criterion_allows(db, content_params, meta_changed=changed):
+                publish_event(db, "master_changed", m.id, user.user_id)
+
     db.commit()
     return {"id": str(m.id), "version": m.version}
+
+
+def _is_master_with_children(db: Session, m: models.Material) -> bool:
+    """Событие master_changed — только для мастер-материала с подчинёнными
+    (16.1-111: получатели — авторы/подписанты подчинённых)."""
+    return db.execute(
+        select(models.Material.id).where(
+            models.Material.master_id == m.id, models.Material.is_deleted.is_(False)
+        ).limit(1)
+    ).first() is not None
+
+
+def _master_change_criterion_allows(db: Session, content_changed: bool, meta_changed: bool) -> bool:
+    """Критерий «изменения мастера» (FR-038, system_settings §2.5):
+    'content' (по умолчанию) — только контент (файл/текст);
+    'any' — любое изменение (включая метаданные)."""
+    import json as _json
+
+    row = db.execute(
+        select(models.SystemSetting).where(models.SystemSetting.key == "master_change_criterion")
+    ).scalar_one_or_none()
+    criterion = "content"
+    if row is not None:
+        try:
+            criterion = _json.loads(row.value)
+        except Exception:
+            criterion = "content"
+    if criterion == "any":
+        return content_changed or meta_changed
+    return bool(content_changed)

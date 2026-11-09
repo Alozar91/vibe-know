@@ -10,8 +10,10 @@ import PermissionsEditor from './PermissionsEditor'
 import TransitionMatrix from './TransitionMatrix'
 import SearchView from './SearchView'
 import SearchAnalytics from './SearchAnalytics'
+import NotificationBell, { useUnreadCount } from './NotificationBell'
+import NotificationTriggers from './NotificationTriggers'
 
-type View = { kind: 'browser' } | { kind: 'sections' } | { kind: 'matrix' } | { kind: 'search'; q: string } | { kind: 'analytics' } | { kind: 'material'; id: string }
+type View = { kind: 'browser' } | { kind: 'sections' } | { kind: 'matrix' } | { kind: 'search'; q: string } | { kind: 'analytics' } | { kind: 'material'; id: string } | { kind: 'triggers' }
 
 export default function App() {
   const [ready, setReady] = useState(false)
@@ -20,6 +22,14 @@ export default function App() {
   const [refreshToken, setRefreshToken] = useState(0)
   const [me, setMe] = useState<{ display_name?: string; is_super?: boolean } | null>(null)
   const [searchQ, setSearchQ] = useState('')
+  const unread = useUnreadCount()
+
+  // Колокольчик: «открыть материал» из ленты уведомлений
+  useEffect(() => {
+    const h = (e: Event) => setView({ kind: 'material', id: (e as CustomEvent).detail as string })
+    window.addEventListener('kb:open-material', h)
+    return () => window.removeEventListener('kb:open-material', h)
+  }, [])
 
   useEffect(() => {
     (async () => {
@@ -55,6 +65,7 @@ export default function App() {
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <h1 style={{ fontSize: 22 }}>Корпоративная база знаний</h1>
         <span>
+          <NotificationBell unread={unread} />
           {me?.display_name ?? '…'}{' '}
           {me?.is_super && <small style={{ background: '#333', color: '#fff', padding: '2px 6px', borderRadius: 4 }}>СА</small>}{' '}
           <button onClick={() => logout()}>Выйти</button>
@@ -90,6 +101,12 @@ export default function App() {
             Аналитика поиска
           </button>
         )}
+        {me?.is_super && (
+          <button onClick={() => setView({ kind: 'triggers' })}
+                  style={view.kind === 'triggers' ? activeNav : {}}>
+            Настройка уведомлений
+          </button>
+        )}
       </nav>
 
       {view.kind === 'browser' && (
@@ -100,6 +117,7 @@ export default function App() {
       )}
       {view.kind === 'matrix' && <TransitionMatrix />}
       {view.kind === 'analytics' && <SearchAnalytics />}
+      {view.kind === 'triggers' && <NotificationTriggers />}
       {view.kind === 'search' && (
         <SearchView initialQuery={view.q} onOpenMaterial={(id) => setView({ kind: 'material', id })} />
       )}

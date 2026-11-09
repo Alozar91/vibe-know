@@ -155,9 +155,13 @@ def upload_file(
         m.signatory_id = None  # FR-084
         m.signatory_at = None
     elif status_before == "in_review":
-        # FR-085: аудит правки на ревью; уведомление — этап 9
+        # FR-085: аудит правки на ревью; событие в транзакции (LLD §8.1 —
+        # замена файла меняет контент: material_changed_on_review, 7.7)
         audit_log(db, user, "material.update", "material", m.id,
                   details={"on_review": True, "file_replaced": True})
+        from app.use_cases.notifications.events import publish_event
+
+        publish_event(db, "material_changed_on_review", m.id, user.user_id)
     audit_log(db, user, "file_upload", "material", m.id,
               details={"file_id": str(fo.id), "sha256": sha_hex, "mime": mime,
                        "size": len(data), "filename": filename})

@@ -11,6 +11,7 @@ from app.api.v1 import (
     me,
     permissions,
     roles,
+    search,
     tags,
     types,
     user_roles,
@@ -36,6 +37,6 @@ api_router.include_router(permissions.groups_router)
 api_router.include_router(permissions.snapshot_router)
 api_router.include_router(lifecycle.router)
 api_router.include_router(lifecycle.rules_router)
+api_router.include_router(search.router)
 
-# Дальше по этапам: files (6), master-detail (7), search (8),
-# notifications (9), admin/audit/settings (10).
+# Дальше по этапам: notifications (9), admin/audit/settings (10).

@@ -8,8 +8,10 @@ import MaterialCardView from './MaterialCard'
 import Sections from './Sections'
 import PermissionsEditor from './PermissionsEditor'
 import TransitionMatrix from './TransitionMatrix'
+import SearchView from './SearchView'
+import SearchAnalytics from './SearchAnalytics'
 
-type View = { kind: 'browser' } | { kind: 'sections' } | { kind: 'matrix' } | { kind: 'material'; id: string }
+type View = { kind: 'browser' } | { kind: 'sections' } | { kind: 'matrix' } | { kind: 'search'; q: string } | { kind: 'analytics' } | { kind: 'material'; id: string }
 
 export default function App() {
   const [ready, setReady] = useState(false)
@@ -17,6 +19,7 @@ export default function App() {
   const [view, setView] = useState<View>({ kind: 'browser' })
   const [refreshToken, setRefreshToken] = useState(0)
   const [me, setMe] = useState<{ display_name?: string; is_super?: boolean } | null>(null)
+  const [searchQ, setSearchQ] = useState('')
 
   useEffect(() => {
     (async () => {
@@ -57,6 +60,15 @@ export default function App() {
           <button onClick={() => logout()}>Выйти</button>
         </span>
       </header>
+      {/* Глобальный поиск в шапке — на всех страницах (FR-110, US-034) */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)}
+               placeholder="Поиск…" style={{ flex: 1 }}
+               onKeyDown={(e) => {
+                 if (e.key === 'Enter') setView({ kind: 'search', q: searchQ })
+               }} />
+        <button onClick={() => setView({ kind: 'search', q: searchQ })}>Найти</button>
+      </div>
       <nav style={{ marginBottom: 16, display: 'flex', gap: 8 }}>
         <button onClick={() => setView({ kind: 'browser' })}
                 style={view.kind === 'browser' ? activeNav : {}}>
@@ -72,6 +84,12 @@ export default function App() {
             Матрица переходов
           </button>
         )}
+        {me?.is_super && (
+          <button onClick={() => setView({ kind: 'analytics' })}
+                  style={view.kind === 'analytics' ? activeNav : {}}>
+            Аналитика поиска
+          </button>
+        )}
       </nav>
 
       {view.kind === 'browser' && (
@@ -81,6 +99,10 @@ export default function App() {
         <Sections onOpenMaterial={(id) => setView({ kind: 'material', id })} refreshToken={refreshToken} />
       )}
       {view.kind === 'matrix' && <TransitionMatrix />}
+      {view.kind === 'analytics' && <SearchAnalytics />}
+      {view.kind === 'search' && (
+        <SearchView initialQuery={view.q} onOpenMaterial={(id) => setView({ kind: 'material', id })} />
+      )}
       {view.kind === 'material' && (
         <>
           <MaterialCardView

@@ -126,5 +126,10 @@ def create_material(
 
     commit_version(db, m, user, snapshot=snapshot_from_material(db, m))
 
+    # Этап 8: первичный FTS-вектор (LLD §7.1 — пересчёт при записи)
+    from app.use_cases.materials.search_common import update_search_vector
+
+    update_search_vector(db, m)
+
     db.commit()
     return to_out(m)

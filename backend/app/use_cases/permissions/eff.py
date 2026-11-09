@@ -11,6 +11,7 @@ from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db import models
+from app.use_cases.permissions.cache import get_cached, put_cached
 
 PROCESS_PERMS = ("edit", "delete", "review", "publish", "archive")
 DRAFT_STATUSES = ("draft", "in_review", "approved")
@@ -19,7 +20,14 @@ PERMISSIONS_CATALOG = [p.value for p in models.PermissionCode]  # FR-106
 
 
 def user_role_ids(db: Session, user_id) -> list:
-    """ID ролей пользователя + None, если существует виртуальная «Все пользователи»."""
+    """ID ролей пользователя + None, если существует виртуальная «Все пользователи».
+
+    memberships кэшируются (§3.3); инвалидация — NOTIFY после мутаций ролей.
+    """
+    key = f"uroles:{user_id}"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached
     ids = list(
         db.execute(
             select(models.UserRole.role_id).where(models.UserRole.user_id == user_id)
@@ -30,6 +38,7 @@ def user_role_ids(db: Session, user_id) -> list:
     ).first() is not None
     if has_virtual:
         ids.append(None)
+    put_cached(key, ids)
     return ids
 
 
@@ -67,6 +76,15 @@ def eff_rows(
         else models.PermissionSnapshot.role_id.is_(None),
         or_(*obj_conds),
     ]
+    # Кэш снапшотов (§3.3): ключ = цепочка объектов + роли пользователя.
+    # Инвалидация — NOTIFY rights_invalidate после commit мутаций прав/ролей.
+    chain_key = ",".join(
+        ([str(material_id)] if material_id else []) + [str(g) for g in chain_group_ids]
+    ) or "none"
+    cache_key = f"eff:{user_id}:{chain_key}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
     rows = db.execute(
         select(
             models.PermissionEntry.permission,
@@ -81,7 +99,9 @@ def eff_rows(
         .where(and_(*conds))
         .group_by(models.PermissionEntry.permission)
     ).all()
-    return {perm: (int(a), int(d)) for perm, a, d in rows}
+    result = {perm: (int(a), int(d)) for perm, a, d in rows}
+    put_cached(cache_key, result)
+    return result
 
 
 def false_cond():

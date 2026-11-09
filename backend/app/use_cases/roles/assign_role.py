@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db import models
 from app.use_cases.common import get_role_or_404, get_user_or_404, require_super
+from app.use_cases.permissions.cache import commit_rights
 
 
 def assign_role(db: Session, is_super: bool, user_id: str, role_id: str) -> None:
@@ -18,4 +19,4 @@ def assign_role(db: Session, is_super: bool, user_id: str, role_id: str) -> None
     ).scalar_one_or_none()
     if link is None:
         db.add(models.UserRole(user_id=target.id, role_id=role.id))
-        db.commit()
+        commit_rights(db)

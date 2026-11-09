@@ -7,6 +7,7 @@ from app.use_cases.common import get_role_or_404, require_super, validate_permis
 from app.use_cases.errors import domain_rule_violation, name_conflict
 from app.use_cases.roles.constants import VIRTUAL_ALL_USERS_NAME
 from app.use_cases.roles.dto import to_out
+from app.use_cases.permissions.cache import commit_rights
 
 
 def update_role(
@@ -31,5 +32,5 @@ def update_role(
         role.permissions.clear()
         for code in validate_permissions(permissions):
             role.permissions.append(models.RolePermission(permission=code))
-    db.commit()
+    commit_rights(db)
     return to_out(role)

@@ -5,6 +5,7 @@ from app.db import models
 from app.use_cases.common import require_super, validate_permissions
 from app.use_cases.errors import name_conflict
 from app.use_cases.roles.dto import to_out
+from app.use_cases.permissions.cache import commit_rights
 
 
 def create_role(db: Session, is_super: bool, name: str, permissions: list[str]) -> dict:
@@ -14,7 +15,7 @@ def create_role(db: Session, is_super: bool, name: str, permissions: list[str]) 
     for code in validate_permissions(permissions):
         role.permissions.append(models.RolePermission(permission=code))
     db.add(role)
-    db.commit()
+    commit_rights(db)
     return to_out(role)
 
 

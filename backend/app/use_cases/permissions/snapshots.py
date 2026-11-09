@@ -6,6 +6,7 @@ from app.db import models
 from app.use_cases.common import parse_uuid, require_super
 from app.use_cases.errors import DomainError, not_found
 from app.use_cases.permissions.eff import PERMISSIONS_CATALOG
+from app.use_cases.permissions.cache import commit_rights
 
 STATES = ("allow", "deny", "unset")  # FR-102: Разрешить/Запретить/Не задано
 
@@ -131,7 +132,7 @@ def create_snapshot(
         else:
             snap.entries.append(models.PermissionEntry(permission=models.PermissionCode(perm), state=state))
     db.add(snap)
-    db.commit()
+    commit_rights(db)
     db.expire(snap, ["entries"])
     return _to_out(snap)
 
@@ -160,7 +161,7 @@ def update_snapshot(
             existing.state = state
         else:
             snap.entries.append(models.PermissionEntry(permission=models.PermissionCode(perm), state=state))
-    db.commit()
+    commit_rights(db)
     db.expire(snap, ["entries"])
     return _to_out(snap)
 
@@ -173,4 +174,4 @@ def delete_snapshot(db: Session, is_super: bool, snapshot_id: str) -> None:
     if snap is None:
         raise not_found("Снапшот не найден")
     db.delete(snap)
-    db.commit()
+    commit_rights(db)

@@ -49,6 +49,10 @@ def create_app() -> FastAPI:
 
 
 async def _lifespan(app: FastAPI):
+    # Кэш прав: LISTEN rights_invalidate в фоновом потоке (§3.3, [уточнение LLD])
+    from app.use_cases.permissions.cache import start_listener
+
+    start_listener()
     log.info("api.started")
     yield
     log.info("api.stopped")

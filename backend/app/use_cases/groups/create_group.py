@@ -7,6 +7,7 @@ from app.use_cases.common import parse_uuid, require_super
 from app.use_cases.errors import DomainError, name_conflict
 from app.use_cases.groups.constants import NAME_MAX_LEN
 from app.use_cases.groups.dto import to_out
+from app.use_cases.permissions.cache import commit_rights
 
 
 def normalize_name(name: str) -> str:
@@ -45,7 +46,7 @@ def create_group(
     db.flush()
     # parent_path завершается "/"; корневой — "". Сегмент = id + "/"
     g.path = f"{parent_path}{g.id}/"
-    db.commit()
+    commit_rights(db)
     return to_out(g)
 
 

@@ -55,6 +55,22 @@ def _check_version(m: models.Material, expected: int) -> None:
         )
 
 
+def _block_master_with_published_children(db: Session, m: models.Material) -> None:
+    """FR-041 (§4.3): правка контента мастера с подчинёнными в «Публикации»
+    блокируется тем же валидатором, что и смена статуса."""
+    from app.use_cases.errors import master_status_locked
+
+    has_published_children = db.execute(
+        select(models.Material.id).where(
+            models.Material.master_id == m.id,
+            models.Material.is_deleted.is_(False),
+            models.Material.status == models.MaterialStatus.published,
+        ).limit(1)
+    ).first()
+    if has_published_children:
+        raise master_status_locked()
+
+
 def update_material(
     db: Session,
     user,
@@ -66,12 +82,28 @@ def update_material(
     attribute_values: list[dict] | None = None,
     tag_ids: list[str] | None = None,
 ) -> dict:
-    """Правка метаданных/текста (US-009 шаг «редактирование по статусам» — этап 5
-    уточнит допустимость по статусу; здесь — право edit + If-Match)."""
+    """Правка материала (US-009, §4.2 «правки по статусам»):
+    - архив — редактирование запрещено (403, FR-087);
+    - правка контента (файл — этап 6, текст) в approved/published → возврат
+      в draft + очистка подписанта (FR-084); в in_review — статус сохраняется
+      (FR-085; событие уведомления — этап 9);
+    - правка только метаданных (название/тип/атрибуты/теги) статусы не снимает;
+    - мастер с подчинёнными в «Публикации»: правка контента блокируется (FR-041)."""
     m = get_material_or_404(db, user, material_id)
     _require_edit(db, user, m)
     _require_if_match(if_match)
     _check_version(m, _parse_version(if_match))
+
+    status_v = m.status.value if hasattr(m.status, "value") else str(m.status)
+    if status_v == "archived":
+        # FR-087: в архиве недоступно любое редактирование (контент и метаданные)
+        raise access_denied("Материал в архиве; редактирование запрещено")
+
+    content_changed = text_content is not None and text_content != m.text_content
+    if content_changed and status_v in ("published", "approved") and m.master_id is None:
+        # Валидатор 5 (FR-041): мастер/самостоятельный с подчинёнными в published —
+        # контент не правится (иначе возврат в draft нарушил бы инвариант)
+        _block_master_with_published_children(db, m)
 
     changed = False
     type_changed = False
@@ -117,6 +149,7 @@ def update_material(
     if changed:
         # FR-049: обязательные атрибуты действующего типа проверяются в том же
         # сохранении (в т.ч. при смене типа — US-032 шаг 2)
+        from app.use_cases.lifecycle.audit import audit_log
         from app.use_cases.materials.attributes_io import missing_required
 
         missing = missing_required(db, m, t_now)
@@ -125,9 +158,37 @@ def update_material(
                 status=409, code="ATTRIBUTE_REQUIRED_MISSING", title="Не заполнены обязательные атрибуты",
                 detail="Заполните обязательные атрибуты", params={"missing": missing},
             )
+
+        # §4.2: правка контента по статусам (FR-084/085); контент сейчас —
+        # только текстовое представление (файл — этап 6)
+        new_status = status_v
+        if content_changed:
+            if status_v in ("published", "approved"):
+                new_status = "draft"
+            # in_review: статус сохраняется (FR-085); draft — без изменений
+
+        now = datetime.now(timezone.utc)
+        if new_status != status_v:
+            from app.use_cases.lifecycle.status_log import write_status_log
+
+            write_status_log(db, user, m, status_v, new_status)
+            audit_log(
+                db, user, "material.status_change", "material", m.id,
+                details={"from": status_v, "to": new_status, "reason": "content_edit"},
+            )
+            m.status = models.MaterialStatus(new_status)
+            m.signatory_id = None  # FR-084: очистка подписанта
+            m.signatory_at = None
+        elif content_changed and status_v == "in_review":
+            # FR-085: аудит правки на ревью; уведомление material_changed_on_review — этап 9
+            audit_log(db, user, "material.update", "material", m.id,
+                      details={"on_review": True})
+        else:
+            audit_log(db, user, "material.update", "material", m.id)
+
         m.last_editor_id = user.user_id
         m.version += 1
-        m.updated_at = datetime.now(timezone.utc)
+        m.updated_at = now
 
     db.commit()
     return {"id": str(m.id), "version": m.version}

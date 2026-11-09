@@ -5,8 +5,21 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.types import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, new_uuid
@@ -445,3 +458,96 @@ class MaterialTag(Base):
     tag_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("tags.id", ondelete="RESTRICT"), primary_key=True
     )
+
+
+# --- Этап 5: жизненный цикл (LLD §4.1, §2.2; FR-065–095) ---
+
+class TransitionRule(Base):
+    """transition_rules (7.4, FR-070–074): строка матрицы переходов.
+
+    from_status NULL = «*» (любой статус, кроме «Архива»); правила с
+    from_status='archived' запрещены (FR-073) — частичный UNIQUE-индекс +
+    проверка сервиса (ARCHIVED_SOURCE_RULE_FORBIDDEN, §12.2).
+    """
+
+    __tablename__ = "transition_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=new_uuid)
+    from_status: Mapped[MaterialStatus | None] = mapped_column(String(16), nullable=True)  # NULL = «*»
+    to_status: Mapped[MaterialStatus] = mapped_column(String(16), nullable=False)
+    is_protected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    permissions: Mapped[list["TransitionRulePermission"]] = relationship(
+        back_populates="rule", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("from_status", "to_status", name="uq_transition_rules_pair"),
+        Index(
+            "ix_transition_rules_pair",
+            "from_status", "to_status",
+            unique=True,
+            postgresql_where="from_status IS NULL OR from_status <> 'archived'",
+        ),
+    )
+
+
+class TransitionRulePermission(Base):
+    """transition_rule_permissions: PK (rule_id, permission); достаточно любого права (FR-070)."""
+
+    __tablename__ = "transition_rule_permissions"
+
+    rule_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("transition_rules.id", ondelete="CASCADE"), primary_key=True
+    )
+    permission: Mapped[PermissionCode] = mapped_column(String(32), primary_key=True)
+
+    rule: Mapped["TransitionRule"] = relationship(back_populates="permissions")
+
+
+class StatusLog(TimestampMixin, Base):
+    """status_log (FR-075): запись при каждом переходе, включая каскадную архивацию."""
+
+    __tablename__ = "status_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=new_uuid)
+    material_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("materials.id", ondelete="RESTRICT"), nullable=False
+    )
+    from_status: Mapped[MaterialStatus | None] = mapped_column(String(16), nullable=True)
+    to_status: Mapped[MaterialStatus] = mapped_column(String(16), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_status_log_material", "material_id"),
+        Index("ix_status_log_user", "user_id"),
+    )
+
+
+class AuditEntry(Base):
+    """audit_entries (12.1, §11, FR-140–143) — append-only; записи с этапа 5,
+    просмотр/экспорт/очистка — этап 10."""
+
+    __tablename__ = "audit_entries"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
+    )  # NULL — системные события (конвейер файлов)
+    actor_is_service: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    object_type: Mapped[str] = mapped_column(Text, nullable=False)
+    object_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
+    details: Mapped[dict | None] = mapped_column(JSONB().with_variant(JSON, "sqlite"), nullable=True)

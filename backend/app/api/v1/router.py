@@ -5,6 +5,7 @@ from app.api.v1 import (
     attributes,
     dictionaries,
     groups,
+    lifecycle,
     materials,
     me,
     permissions,
@@ -29,6 +30,8 @@ api_router.include_router(materials.router)
 api_router.include_router(permissions.materials_router)
 api_router.include_router(permissions.groups_router)
 api_router.include_router(permissions.snapshot_router)
+api_router.include_router(lifecycle.router)
+api_router.include_router(lifecycle.rules_router)
 
-# Дальше по этапам: lifecycle (5), files (6),
-# master-detail (7), search (8), notifications (9), admin/audit/settings (10).
+# Дальше по этапам: files (6), master-detail (7), search (8),
+# notifications (9), admin/audit/settings (10).

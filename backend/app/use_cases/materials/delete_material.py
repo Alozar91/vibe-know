@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import models
-from app.use_cases.errors import access_denied, domain_rule_violation
+from app.use_cases.errors import DomainError, access_denied, domain_rule_violation
 from app.use_cases.materials.get_material import get_material_or_404
 from app.use_cases.permissions.can import can
 
@@ -17,8 +17,6 @@ def delete_material(db: Session, user, material_id: str, if_match: str | None) -
     if not can(db, user, m.id, "delete"):
         raise access_denied("Нет права «Удаление» на материал")
     if if_match is None or not if_match.strip():
-        from app.use_cases.errors import DomainError
-
         raise DomainError(
             status=428, code="PRECONDITION_REQUIRED", title="Требуется If-Match",
             detail="Передайте заголовок If-Match с текущей версией материала",
@@ -28,8 +26,6 @@ def delete_material(db: Session, user, material_id: str, if_match: str | None) -
     except ValueError:
         raise domain_rule_violation(400, "If-Match должен содержать номер версии")
     if m.version != expected:
-        from app.use_cases.errors import DomainError
-
         raise DomainError(
             status=412, code="VERSION_CONFLICT", title="Конфликт версии",
             detail=f"Материал изменён (текущая версия {m.version})",

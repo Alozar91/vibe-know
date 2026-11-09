@@ -413,6 +413,10 @@ def test_archive_from_any_status_no_file_needed(sa, db):
     assert r2.status_code == 409
     assert r2.json()["code"] == "TRANSITION_NOT_ALLOWED"  # финальный статус (FR-087)
 
+    # Из архива список доступных переходов пуст (FR-087: архив финален)
+    tr = sa.get(f"/api/v1/materials/{m['id']}/transitions").json()
+    assert tr == []
+
 
 def test_archive_cascade_requires_confirm(sa, db):
     """US-021 шаги 4–5: каскад — после подтверждения; children_count в ошибке (FR-039)."""

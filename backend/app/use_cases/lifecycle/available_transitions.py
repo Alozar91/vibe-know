@@ -45,6 +45,9 @@ def available_transitions(db: Session, user, material) -> list[dict]:
 
     out = []
     for rule in rules:
+        ts_v = rule.to_status.value if hasattr(rule.to_status, "value") else str(rule.to_status)
+        if ts_v == from_v:
+            continue  # «*» не предлагает переход в текущий статус (архив — финален, FR-087)
         perms = [
             p.permission.value if hasattr(p.permission, "value") else str(p.permission)
             for p in rule.permissions

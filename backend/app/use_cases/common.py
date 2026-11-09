@@ -39,6 +39,15 @@ def get_role_or_404(db: Session, role_id: str) -> models.Role:
     return r
 
 
+def get_group_or_404(db: Session, group_id: str, allow_deleted: bool = False) -> models.Group:
+    g = db.execute(
+        select(models.Group).where(models.Group.id == parse_uuid(group_id))
+    ).scalar_one_or_none()
+    if g is None or (g.is_deleted and not allow_deleted):
+        raise not_found("Группа не найдена")
+    return g
+
+
 def validate_permissions(permissions: list[str]) -> list[models.PermissionCode]:
     """Каталог прав FR-106: неизвестный код — VALIDATION_ERROR (LLD §12.2)."""
     codes = []

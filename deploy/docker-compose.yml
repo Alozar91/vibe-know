@@ -163,6 +163,7 @@ services:
       KB_S3_BUCKET: ${SILO_BUCKET}
       KB_S3_ACCESS_KEY: ${SILO_ROOT_USER}
       KB_S3_SECRET_KEY: ${SILO_ROOT_PASSWORD}
+      KB_GOTENBERG_URL: http://gotenberg:3000
       KB_OIDC_ISSUER: http://localhost:8080/realms/kb
       KB_OIDC_INTROSPECTION_URL: http://keycloak:8080/realms/kb/protocol/openid-connect/token/introspect
       KB_OIDC_CLIENT_ID: kb-api
@@ -202,6 +203,7 @@ services:
       KB_S3_BUCKET: ${SILO_BUCKET}
       KB_S3_ACCESS_KEY: ${SILO_ROOT_USER}
       KB_S3_SECRET_KEY: ${SILO_ROOT_PASSWORD}
+      KB_GOTENBERG_URL: http://gotenberg:3000
       KB_OIDC_ISSUER: http://localhost:8080/realms/kb
       KB_OIDC_INTROSPECTION_URL: http://keycloak:8080/realms/kb/protocol/openid-connect/token/introspect
       KB_OIDC_CLIENT_ID: kb-api

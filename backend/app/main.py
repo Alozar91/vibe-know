@@ -110,12 +110,17 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def validation_handler(request: Request, exc: RequestValidationError):
         await _log_4xx(request, exc)
+        # exc.errors() может содержать input с bytes — не JSON-сериализуемо (500).
+        # Оставляем только безопасные поля каждой ошибки (NFR: единый problem+json).
+        safe = [
+            {k: v for k, v in err.items() if k != "input"} for err in exc.errors()
+        ]
         return problem(
             400,
             "VALIDATION_ERROR",
             "Ошибка валидации запроса",
             "Проверьте формат и значения полей запроса",
-            params={"errors": exc.errors()},
+            params={"errors": safe},
         )
 
     @app.exception_handler(Exception)

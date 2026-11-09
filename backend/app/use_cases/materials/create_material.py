@@ -121,5 +121,10 @@ def create_material(
 
         apply_tags(db, m, tag_ids)
 
+    # Версия 1 (FR-144, US-007 шаг 6): снапшот после записи атрибутов/тегов
+    from app.use_cases.materials.versions import snapshot_from_material, commit_version
+
+    commit_version(db, m, user, snapshot=snapshot_from_material(db, m))
+
     db.commit()
     return to_out(m)

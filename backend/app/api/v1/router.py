@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     attributes,
     dictionaries,
+    files,
     groups,
     lifecycle,
     materials,
@@ -14,6 +15,7 @@ from app.api.v1 import (
     types,
     user_roles,
     users,
+    versions,
 )
 
 api_router = APIRouter()
@@ -27,6 +29,8 @@ api_router.include_router(attributes.router)
 api_router.include_router(dictionaries.router)
 api_router.include_router(tags.router)
 api_router.include_router(materials.router)
+api_router.include_router(files.router)
+api_router.include_router(versions.router)
 api_router.include_router(permissions.materials_router)
 api_router.include_router(permissions.groups_router)
 api_router.include_router(permissions.snapshot_router)

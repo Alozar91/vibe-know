@@ -89,6 +89,43 @@ export interface StatusLogEntry {
   created_at: string
 }
 
+// Этап 6: файлы (§6.2–6.4) и версии (§5, FR-144–148)
+export interface FileState {
+  file_id: string | null
+  filename?: string
+  mime_type?: string
+  size_bytes?: number
+  scan_state: 'pending_scan' | 'scanning' | 'ready' | 'infected' | null
+  pdf_state: 'none' | 'converting' | 'ready_pdf' | 'convert_failed' | null
+}
+
+export interface VersionInfo {
+  number: number
+  author_id: string
+  created_at: string
+}
+
+export interface VersionDiff {
+  number: number
+  file_changed: boolean
+  text_diff: string[]
+  metadata_changes: { field: string; old: string; new: string }[]
+}
+
+export const SCAN_RU: Record<NonNullable<FileState['scan_state']>, string> = {
+  pending_scan: 'Ожидает проверки',
+  scanning: 'Проверяется',
+  ready: 'Проверен',
+  infected: 'Заблокирован (вирус)',
+}
+
+export const PDF_RU: Record<NonNullable<FileState['pdf_state']>, string> = {
+  none: '—',
+  converting: 'Конвертируется…',
+  ready_pdf: 'PDF готов',
+  convert_failed: 'Ошибка конвертации',
+}
+
 export const STATUS_RU: Record<Material['status'], string> = {
   draft: 'Черновик',
   in_review: 'На проверке',

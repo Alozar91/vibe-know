@@ -153,3 +153,36 @@ export async function api<T = unknown>(path: string, opts: RequestInit = {}): Pr
   }
   return body as T
 }
+
+// multipart-загрузка (этап 6, §6.2): Content-Type ставит браузер (boundary)
+export async function apiUpload<T = unknown>(path: string, file: File, query = ''): Promise<T> {
+  if (!tokens) throw new ApiError(401, 'NO_TOKEN', 'Не выполнен вход')
+  if (Date.now() > tokens.expires_at && tokens.refresh_token) await tryRefresh()
+  const form = new FormData()
+  form.append('file', file)
+  const r = await fetch(`/api/v1${path}${query}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokens.access_token}` },
+    body: form,
+  })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    const p = (body ?? {}) as Record<string, unknown>
+    throw new ApiError(r.status,
+                       (p.code as string) ?? 'HTTP_ERROR',
+                       (p.title as string) ?? 'Ошибка',
+                       p.detail as string | undefined,
+                       p.params as Record<string, unknown> | undefined)
+  }
+  return body as T
+}
+
+// авторизованное скачивание/предпросмотр (этап 6, §6.4): Bearer — в fetch,
+// не в <img src>/<a href> (браузер к silo не обращается — api-стриминг)
+export async function apiDownload(path: string): Promise<Response> {
+  if (!tokens) throw new ApiError(401, 'NO_TOKEN', 'Не выполнен вход')
+  if (Date.now() > tokens.expires_at && tokens.refresh_token) await tryRefresh()
+  return fetch(`/api/v1${path}`, {
+    headers: { Authorization: `Bearer ${tokens.access_token}` },
+  })
+}

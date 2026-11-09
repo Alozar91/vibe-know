@@ -1,0 +1,155 @@
+// Аутентификация SPA: Authorization Code + PKCE (HLD §6.1, LLD §10).
+// Клиент kb-spa (public, S256); токены — в памяти (не localStorage), refresh-токен.
+// Keycloak 26: /realms/kb/... ; на prod тот же origin через nginx.
+
+const KC_BASE = 'http://localhost:8080/realms/kb'
+const CLIENT_ID = 'kb-spa'
+const REDIRECT_URI = window.location.origin + window.location.pathname
+// webOrigins realm: localhost, localhost:5173 — оба origin валидны
+
+interface Tokens {
+  access_token: string
+  refresh_token?: string
+  expires_at: number // monotonic-ish: Date.now() + expires_in*1000
+}
+
+let tokens: Tokens | null = null
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+
+function b64url(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+async function sha256(input: string): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input)))
+}
+
+export async function login(): Promise<void> {
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)))
+  const challenge = b64url(await sha256(verifier))
+  sessionStorage.setItem('pkce_verifier', verifier)
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: 'code',
+    scope: 'openid profile email',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+  })
+  window.location.href = `${KC_BASE}/protocol/openid-connect/auth?${params}`
+}
+
+function logoutRedirect(): void {
+  const params = new URLSearchParams({
+    post_logout_redirect_uri: REDIRECT_URI,
+    ...(tokens ? {} : {}),
+  })
+  // id_token не хранится — без id_token_hint; выход по сессии Keycloak
+  window.location.href = `${KC_BASE}/protocol/openid-connect/logout?${params}`
+}
+
+export async function completeLogin(): Promise<boolean> {
+  const q = new URLSearchParams(window.location.search)
+  const code = q.get('code')
+  const err = q.get('error')
+  if (err) {
+    console.error('KC error:', q.get('error_description'))
+    return false
+  }
+  if (!code) return false
+  const verifier = sessionStorage.getItem('pkce_verifier')
+  if (!verifier) return false
+  history.replaceState({}, '', REDIRECT_URI) // code одноразовый — из URL убрать
+  sessionStorage.removeItem('pkce_verifier')
+
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    code,
+    code_verifier: verifier,
+  })
+  const r = await fetch(`${KC_BASE}/protocol/openid-connect/token`, { method: 'POST', body })
+  if (!r.ok) return false
+  const j = await r.json()
+  setTokens(j)
+  return true
+}
+
+function setTokens(j: Record<string, unknown>): void {
+  tokens = {
+    access_token: j.access_token as string,
+    refresh_token: j.refresh_token as string | undefined,
+    expires_at: Date.now() + ((j.expires_in as number) - 30) * 1000, // запас 30 с
+  }
+  if (tokens!.refresh_token) scheduleRefresh((j.refresh_expires_in as number) ?? 1800)
+}
+
+function scheduleRefresh(refreshExpiresIn: number): void {
+  if (refreshTimer) clearTimeout(refreshTimer)
+  // обновление access-токена заранее; полная релогинизация при истечении refresh
+  const delay = Math.max(60, refreshExpiresIn / 2) * 1000
+  refreshTimer = setTimeout(tryRefresh, delay)
+}
+
+async function tryRefresh(): Promise<void> {
+  if (!tokens?.refresh_token) return
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    client_id: CLIENT_ID,
+    refresh_token: tokens.refresh_token,
+  })
+  const r = await fetch(`${KC_BASE}/protocol/openid-connect/token`, { method: 'POST', body })
+  if (r.ok) {
+    setTokens(await r.json())
+  } else {
+    logoutRedirect()
+  }
+}
+
+export function getAccessToken(): string | null {
+  return tokens?.access_token ?? null
+}
+
+export function isAuthenticated(): boolean {
+  return tokens !== null
+}
+
+export function logout(): void {
+  logoutRedirect()
+}
+
+// --- API-клиент: Bearer + problem+json (LLD §12.1) ---
+
+export class ApiError extends Error {
+  constructor(public status: number, public code: string, public title: string,
+              public detail?: string, public params?: Record<string, unknown>) {
+    super(detail ?? title)
+  }
+}
+
+export async function api<T = unknown>(path: string, opts: RequestInit = {}): Promise<T> {
+  if (!tokens) throw new ApiError(401, 'NO_TOKEN', 'Не выполнен вход')
+  if (Date.now() > tokens.expires_at && tokens.refresh_token) await tryRefresh()
+  const r = await fetch(`/api/v1${path}`, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${tokens.access_token}`,
+      ...(opts.headers ?? {}),
+    },
+  })
+  if (r.status === 204) return undefined as T
+  const ct = r.headers.get('content-type') ?? ''
+  const body = ct.includes('json') ? await r.json() : await r.text()
+  if (!r.ok) {
+    const p = (body ?? {}) as Record<string, unknown>
+    throw new ApiError(r.status,
+                       (p.code as string) ?? 'HTTP_ERROR',
+                       (p.title as string) ?? 'Ошибка',
+                       p.detail as string | undefined,
+                       p.params as Record<string, unknown> | undefined)
+  }
+  return body as T
+}

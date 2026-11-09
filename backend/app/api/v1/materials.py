@@ -57,14 +57,16 @@ async def list_materials_ep(
 @router.get("/materials/deleted")
 async def deleted_materials_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> dict:
     """Служебный раздел (FR-090) — только СА; полная реализация — этап 10."""
-    from app.use_cases.common import require_super
     from sqlalchemy import select
+
+    from app.db import models
+    from app.use_cases.common import require_super
 
     require_super(user.is_super)
     rows = db.execute(
-        select(__import__("app.db.models", fromlist=["Material"]).Material)
-        .where(__import__("app.db.models", fromlist=["Material"]).Material.is_deleted.is_(True))
-        .order_by(__import__("app.db.models", fromlist=["Material"]).Material.deleted_at.desc())
+        select(models.Material)
+        .where(models.Material.is_deleted.is_(True))
+        .order_by(models.Material.deleted_at.desc())
     ).scalars().all()
     return {
         "items": [

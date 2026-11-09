@@ -27,7 +27,7 @@ def get_session_factory() -> sessionmaker[Session]:
 
 
 def get_db() -> Iterator[Session]:
-    """FastAPI-зависимость: сессия на запрос."""
+    """FastAPI-зависимость: сессия на запрос; rollback при ошибке (частичное состояние не живёт)."""
     session = get_session_factory()()
     try:
         yield session

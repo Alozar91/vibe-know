@@ -32,8 +32,13 @@ def db():
     from app.main import app
 
     def override_get_db():
-        # Одна сессия на весь тест: эндпоинты сами делают commit при изменениях
-        yield session
+        # Одна сессия на весь тест: эндпоинты сами делают commit при изменениях;
+        # при ошибке — откат (частичное состояние не живёт, как в проде)
+        try:
+            yield session
+        except Exception:
+            session.rollback()
+            raise
 
     app.dependency_overrides[get_db] = override_get_db
     yield session

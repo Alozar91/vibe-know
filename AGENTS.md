@@ -16,7 +16,7 @@ All content is in **Russian** — write edits and new docs in Russian, matching 
 
 ## MVP implementation (step [5])
 
-- Monorepo in this same repo: `backend/` (FastAPI + uv), `frontend/` (React/Vite), `deploy/` (docker-compose); git branch `mvp` with per-stage feature branches `mvp/etap-N` (PR-style into `mvp`).
+- Monorepo in this same repo: `backend/` (FastAPI + uv), `frontend/` (React/Vite), `deploy/` (docker-compose); git branch `mvp` with per-stage feature branches `mvp-etap-N` (ref names `mvp/etap-N` are impossible while branch `mvp` exists), PR-style into `mvp`.
 - Follow the 11-stage plan approved by the user; implement a stage only after the previous stage's US acceptance. Do not jump ahead or start post-MVP items (CONCEPT §15.3).
 - Tests: pytest per stage (unit tests for key logic + API tests per US scenario).
 - `C:\Users\SeregaPC\.opencode\plan\mvp-plan.md` (outside the repo) is the working plan — never commit it.

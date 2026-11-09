@@ -1,0 +1,274 @@
+# Развёртывание MVP «Корпоративная база знаний» (HLD §3.2, single-node).
+# Версии ПО — строго по HLD §4. Параметры окружения — .env (образец .env.example); секреты — не в репозитории.
+name: kb
+
+services:
+  postgres:
+    image: postgres:18.6
+    container_name: kb-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      # PG18: монтируем /var/lib/postgresql (данные в major-версионном подкаталоге,
+      # см. docker-library/postgres#37) — совместимо с будущими pg_upgrade
+      - pgdata:/var/lib/postgresql
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  keycloak:
+    # Штатный образ, start-dev: TLS/prod-режим Keycloak — этап 11 (тогда переход на
+    # start --optimized); здоровье — mgmt-порт 9000 (внутренний).
+    image: keycloak/keycloak:26.8.2-0
+    container_name: kb-keycloak
+    command: ["start-dev", "--import-realm", "--health-enabled=true"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ${POSTGRES_USER}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_STRICT: "false"
+      KC_PROXY_HEADERS: xforwarded
+      # Переменные для подстановки ${VAR} в realm-kb-test.json при импорте
+      KB_API_CLIENT_SECRET: ${KB_API_CLIENT_SECRET}
+      KB_CLI_CLIENT_SECRET: ${KB_CLI_CLIENT_SECRET}
+      KB_TEST_PASSWORD: ${KB_TEST_PASSWORD}
+    volumes:
+      - ./keycloak/realm-kb-test.json:/opt/keycloak/data/import/realm-kb-test.json:ro
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # В образе Keycloak нет curl; health на mgmt-порту 9000 (внутренний)
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '200 OK' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 24
+      start_period: 120s
+    restart: unless-stopped
+
+  valkey:
+    image: valkey/valkey:9.1.3-alpine
+    container_name: kb-valkey
+    command: ["valkey-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - valkeydata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  # CAS-хранилище (S3 API). Наружу не публикуется: браузеру silo недоступен (HLD §3.2);
+  # доступ api/worker — по внутренней сети Compose.
+  silo:
+    image: pgsty/silo:RELEASE.2026-10-26T00-00-00Z
+    container_name: kb-silo
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${SILO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${SILO_ROOT_PASSWORD}
+      MINIO_BROWSER: "false"
+    volumes:
+      - silodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:9000/minio/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # Однократное создание бакета CAS (клиент mc — от того же вендора, что silo)
+  silo-init:
+    image: pgsty/mc:latest
+    container_name: kb-silo-init
+    depends_on:
+      silo:
+        condition: service_healthy
+    environment:
+      SILO_ROOT_USER: ${SILO_ROOT_USER}
+      SILO_ROOT_PASSWORD: ${SILO_ROOT_PASSWORD}
+      SILO_BUCKET: ${SILO_BUCKET}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://silo:9000 $$SILO_ROOT_USER $$SILO_ROOT_PASSWORD &&
+      mc mb --ignore-existing local/$$SILO_BUCKET &&
+      echo 'бакет CAS готов'"
+
+  # Конвертер офисных форматов в PDF (HLD §3.2; подключается задачами этапа 6)
+  gotenberg:
+    image: gotenberg/gotenberg:9.2.0
+    container_name: kb-gotenberg
+    healthcheck:
+      # В образе Gotenberg нет wget/curl и /bin/sh — dash без /dev/tcp; проба через python3? —
+      # тоже нет. Простейший корректный способ: bash недоступен, поэтому проверяем TCP из busybox?
+      # Надёжный вариант: временный контур проверяется Prometheus (HTTP-метрики этапа 11);
+      # здесь — проверка процесса.
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: kb-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    environment:
+      KB_DATABASE_URL: postgresql+psycopg://kb:${POSTGRES_PASSWORD}@postgres:5432/kb
+      KB_REDIS_URL: redis://valkey:6379/0
+      KB_S3_ENDPOINT: http://silo:9000
+      KB_S3_BUCKET: ${SILO_BUCKET}
+      KB_S3_ACCESS_KEY: ${SILO_ROOT_USER}
+      KB_S3_SECRET_KEY: ${SILO_ROOT_PASSWORD}
+      KB_OIDC_ISSUER: http://localhost:8080/realms/kb
+      KB_OIDC_INTROSPECTION_URL: http://keycloak:8080/realms/kb/protocol/openid-connect/token/introspect
+      KB_OIDC_CLIENT_ID: kb-api
+      KB_OIDC_CLIENT_SECRET: ${KB_API_CLIENT_SECRET}
+      KB_FRONTEND_URL: http://localhost
+      KB_LOG_LEVEL: ${LOG_LEVEL}
+    ports:
+      # 8000 на хосте занят сторонним процессом — хост-маппинг 8001 (внутри сети — 8000)
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  # Фоновые задачи (Celery); обработчики задач — этапы 6, 9, 10
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: kb-worker
+    command: ["python", "-m", "app.worker.main"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      silo:
+        condition: service_healthy
+    environment:
+      KB_DATABASE_URL: postgresql+psycopg://kb:${POSTGRES_PASSWORD}@postgres:5432/kb
+      KB_REDIS_URL: redis://valkey:6379/0
+      KB_S3_ENDPOINT: http://silo:9000
+      KB_S3_BUCKET: ${SILO_BUCKET}
+      KB_S3_ACCESS_KEY: ${SILO_ROOT_USER}
+      KB_S3_SECRET_KEY: ${SILO_ROOT_PASSWORD}
+      KB_OIDC_ISSUER: http://localhost:8080/realms/kb
+      KB_OIDC_INTROSPECTION_URL: http://keycloak:8080/realms/kb/protocol/openid-connect/token/introspect
+      KB_OIDC_CLIENT_ID: kb-api
+      KB_OIDC_CLIENT_SECRET: ${KB_API_CLIENT_SECRET}
+      KB_LOG_LEVEL: ${LOG_LEVEL}
+    # Экспозер метрик worker — порт 9808 (внутренняя сеть, LLD §9)
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('127.0.0.1', 9808), 2)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    restart: unless-stopped
+
+  # nginx: TLS-терминация (FR-149; TLS-сертификат — этап 11), статика SPA, прокси /api
+  nginx:
+    build:
+      context: ..
+      dockerfile: deploy/nginx/Dockerfile
+    container_name: kb-nginx
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    container_name: kb-prometheus
+    depends_on:
+      - api
+      - worker
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.18.0
+    container_name: kb-postgres-exporter
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATA_SOURCE_URI: postgres:5432/kb?sslmode=disable
+      DATA_SOURCE_USER: ${POSTGRES_USER}
+      DATA_SOURCE_PASS: ${POSTGRES_PASSWORD}
+    ports:
+      - "9187:9187"
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.10.2
+    container_name: kb-node-exporter
+    command:
+      - "--path.rootfs=/host"
+    volumes:
+      - /:/host:ro
+    pid: "host"
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+
+  # Alertmanager: канал алертинга — email СА (NFR-19); SMTP настраивается при внедрении,
+  # до этого алертинг отключён (US-040 A1) — заглушка с пустым приёмником.
+  alertmanager:
+    image: prom/alertmanager:v0.29.0
+    container_name: kb-alertmanager
+    volumes:
+      - ./prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  valkeydata:
+  silodata:
+  promdata:

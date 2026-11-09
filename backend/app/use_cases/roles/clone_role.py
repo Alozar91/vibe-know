@@ -8,6 +8,7 @@ from app.use_cases.common import get_role_or_404, require_super
 from app.use_cases.errors import domain_rule_violation
 from app.use_cases.roles.constants import VIRTUAL_ALL_USERS_NAME
 from app.use_cases.roles.dto import to_out
+from app.use_cases.permissions.cache import commit_rights
 
 
 def clone_role(db: Session, is_super: bool, role_id: str) -> dict:
@@ -29,7 +30,7 @@ def clone_role(db: Session, is_super: bool, role_id: str) -> dict:
             clone.permissions.append(models.RolePermission(permission=p.permission))
         db.add(clone)
         try:
-            db.commit()
+            commit_rights(db)
             return to_out(clone)
         except IntegrityError:
             db.rollback()

@@ -8,6 +8,7 @@ from app.db import models
 from app.use_cases.common import get_group_or_404, require_super
 from app.use_cases.errors import DomainError, domain_rule_violation, not_found
 from app.use_cases.groups.dto import to_out
+from app.use_cases.permissions.cache import commit_rights
 
 
 def delete_group(
@@ -42,7 +43,7 @@ def delete_group(
             )
         _delete_snapshots(db, subtree)
         db.delete(g)
-        db.commit()
+        commit_rights(db)
         return {"mode": "hard", "subtree_count": 1}
 
     # Soft-delete ветки (FR-019): подгруппы и материалы скрываются
@@ -52,7 +53,7 @@ def delete_group(
     for node in subtree:
         node.is_deleted = True
         node.deleted_at = now
-    db.commit()
+    commit_rights(db)
     return {"mode": "soft", "subtree_count": len(subtree)}
 
 
@@ -68,7 +69,7 @@ def restore_group(db: Session, is_super: bool, group_id: str) -> dict:
     for node in _subtree(db, g, only_deleted=True):
         node.is_deleted = False
         node.deleted_at = None
-    db.commit()
+    commit_rights(db)
     return to_out(g)
 
 

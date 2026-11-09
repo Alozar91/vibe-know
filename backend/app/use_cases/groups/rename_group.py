@@ -8,6 +8,7 @@ from app.use_cases.errors import DomainError
 from app.use_cases.groups.constants import NAME_MAX_LEN
 from app.use_cases.groups.create_group import normalize_name
 from app.use_cases.groups.dto import to_out
+from app.use_cases.permissions.cache import commit_rights
 
 
 def rename_group(db: Session, is_super: bool, group_id: str, name: str) -> dict:
@@ -38,5 +39,5 @@ def rename_group(db: Session, is_super: bool, group_id: str, name: str) -> dict:
                               detail="Группа с таким названием уже существует в этом разделе")
     g.name = name.strip()
     g.normalized_name = new_normalized
-    db.commit()
+    commit_rights(db)
     return to_out(g)

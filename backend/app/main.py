@@ -49,6 +49,10 @@ def create_app() -> FastAPI:
 
 
 async def _lifespan(app: FastAPI):
+    # Кэш прав: LISTEN rights_invalidate в фоновом потоке (§3.3, [уточнение LLD])
+    from app.use_cases.permissions.cache import start_listener
+
+    start_listener()
     log.info("api.started")
     yield
     log.info("api.stopped")
@@ -84,7 +88,13 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(DomainError)
     async def domain_handler(request: Request, exc: DomainError):
-        # Бизнес-ошибки use-cases → problem+json с кодом LLD §12.2
+        # Бизнес-ошибки use-cases → problem+json с кодом LLD §12.2;
+        # откат недозакоммиченной транзакции запроса (частичное состояние не живёт)
+        from app.db.engine import get_db as _get_db
+
+        session = getattr(request.state, "db_session", None)
+        if session is not None:
+            session.rollback()
         return problem(exc.status, exc.code, exc.title, exc.detail, exc.params)
 
     @app.exception_handler(HTTPException)

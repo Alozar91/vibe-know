@@ -40,5 +40,16 @@ def merge_tag(db: Session, is_super: bool, tag_id: str, target_id: str) -> dict:
             else:
                 link.tag_id = target.id
     db.delete(src)
+    # Этап 8: слияние меняет состав тегов материалов → пересчёт их векторов (LLD §7.1)
+    from app.use_cases.materials.search_common import update_search_vector
+
+    for link in db.execute(
+        select(models.MaterialTag).where(models.MaterialTag.tag_id == target.id)
+    ).scalars().all():
+        m = db.execute(
+            select(models.Material).where(models.Material.id == link.material_id)
+        ).scalar_one_or_none()
+        if m is not None:
+            update_search_vector(db, m)
     db.commit()
     return {"merged_into": str(target.id), "name": target.name}

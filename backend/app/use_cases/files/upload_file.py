@@ -169,6 +169,11 @@ def upload_file(
     # Фиксация версии: замена файла — новый file_id (§5.1, FR-147)
     commit_version(db, m, user)
 
+    # Этап 8: пересчёт FTS-вектора (LLD §7.1) — текст/метаданные могли измениться
+    from app.use_cases.materials.search_common import update_search_vector
+
+    update_search_vector(db, m)
+
     pending_enqueue = [ref for ref in (getattr(db, "_pending_task_refs", None) or [])]
     db.commit()
 

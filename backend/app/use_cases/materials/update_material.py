@@ -196,5 +196,10 @@ def update_material(
 
         commit_version(db, m, user)
 
+        # Этап 8: пересчёт FTS-вектора (LLD §7.1) — name/text/attrs/tags изменились
+        from app.use_cases.materials.search_common import update_search_vector
+
+        update_search_vector(db, m)
+
     db.commit()
     return {"id": str(m.id), "version": m.version}

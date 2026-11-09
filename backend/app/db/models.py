@@ -23,6 +23,7 @@ from sqlalchemy.types import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, new_uuid
+from app.db.tsvector import TSVector
 
 
 class User(TimestampMixin, Base):
@@ -390,6 +391,9 @@ class Material(TimestampMixin, Base):
     text_out_of_sync: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # Этап 8 (LLD §7.1): FTS-конфигурация и вектор (не generated — динамическая конфигурация)
+    search_lang: Mapped[str] = mapped_column(String(20), nullable=False, server_default="russian")
+    search_tsv: Mapped[str | None] = mapped_column(TSVector, nullable=True)
     version: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -408,6 +412,9 @@ class Material(TimestampMixin, Base):
         # Этап 7 (LLD §2.3/§2.4): FR-032; список подчинённых/валидаторы
         CheckConstraint("master_id IS NULL OR master_id <> id", name="ck_materials_master_not_self"),
         Index("ix_materials_master", "master_id"),
+        # Этап 8 (LLD §7.2): GIN search_tsv / GIN trgm name,text_content —
+        # создаются миграцией 0008 (USING gin/trgm в декларативной модели
+        # непортабелен на SQLite)
     )
 
 
@@ -675,4 +682,89 @@ class Comment(TimestampMixin, Base):
         # B-tree по объекту/дате (§2.4): лента комментариев карточки
         Index("ix_comments_material", "material_id", "created_at"),
         Index("ix_comments_author", "author_id"),
+    )
+
+
+# ==========================================================================
+# Этап 8: поиск (LLD §7; FR-110–127)
+# ==========================================================================
+
+class SearchEvent(Base):
+    """search_events (9.9, FR-127): факт поискового запроса.
+
+    Без ПДн: user_id не хранится (§7.6). created_at перекрывает TimestampMixin.
+    """
+
+    __tablename__ = "search_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=new_uuid)
+    query_normalized: Mapped[str] = mapped_column(Text, nullable=False)  # lower, trim
+    result_count: Mapped[int] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_search_events_query", "query_normalized"),
+        Index("ix_search_events_created", "created_at"),
+    )
+
+
+class SearchOpen(Base):
+    """search_opens (9.9, FR-127): факт открытия материала из выдачи (CTR, 3.2)."""
+
+    __tablename__ = "search_opens"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=new_uuid)
+    search_event_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("search_events.id", ondelete="CASCADE"), nullable=False
+    )
+    material_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("materials.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_search_opens_event", "search_event_id"),
+        Index("ix_search_opens_material", "material_id"),
+    )
+
+
+class SearchAnalytics(Base):
+    """search_analytics (9.9, FR-127): свёртка за период (worker, ежедневно).
+
+    Период — день (period_start); пересвёртка периода безопасна (§9).
+    """
+
+    __tablename__ = "search_analytics"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=new_uuid)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    hit_count: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    zero_result_count: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    open_count: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+
+    __table_args__ = (
+        UniqueConstraint("period_start", "query", name="uq_search_analytics_period_query"),
+        Index("ix_search_analytics_period", "period_start"),
+    )
+
+
+class SystemSetting(Base):
+    """system_settings (NFR-020): реестр параметров §2.5 (значения — jsonb).
+
+    value хранится строкой JSON (Text) — jsonb-тип непортабелен на SQLite;
+    в PostgreSQL миграция 0008 создаёт колонку как JSONB.
+    """
+
+    __tablename__ = "system_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-строка
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )

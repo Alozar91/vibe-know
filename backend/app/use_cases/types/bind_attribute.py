@@ -44,5 +44,16 @@ def bind_attribute(
     ).scalar_one_or_none() is not None
     if not exists:
         db.add(models.AttributeTypeBinding(type_id=t.id, attribute_id=a.id))
+        db.flush()
+        # Этап 8: состав атрибутов типа изменился → пересчёт векторов материалов
+        # типа (LLD §7.1 «смена состава атрибутов»)
+        from app.use_cases.materials.search_common import update_search_vector
+
+        for m in db.execute(
+            select(models.Material).where(
+                models.Material.type_id == t.id, models.Material.is_deleted.is_(False)
+            )
+        ).scalars().all():
+            update_search_vector(db, m)
         if commit:
             db.commit()

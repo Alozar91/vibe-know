@@ -27,5 +27,11 @@ def add_dictionary_value(db: Session, is_super: bool, dictionary_id: str, value:
         raise name_conflict("Такое значение уже есть в справочнике")
     v = models.DictionaryValue(dictionary_id=d.id, value=value.strip())
     db.add(v)
+    db.flush()
+
+    # Этап 8: новое значение справочника может попасть в атрибуты материалов —
+    # само по себе оно в выдачу не влияет (значение ещё не привязано к материалам),
+    # пересчёт не требуется (LLD §7.1 — пересчёт при записи материала).
+
     db.commit()
     return {"id": str(v.id), "value": v.value}

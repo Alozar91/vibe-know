@@ -7,8 +7,11 @@ from sqlalchemy.orm import Session
 
 from app.db import models
 from app.db.engine import get_db
-from app.use_cases import auth as auth_uc
 from app.use_cases.errors import DomainError
+from app.use_cases.users.ensure_active import ensure_active
+from app.use_cases.users.get_is_super import is_super
+from app.use_cases.users.introspect_token import introspect_token
+from app.use_cases.users.provision_user import upsert_user_from_token
 
 
 class CurrentUser:
@@ -29,11 +32,11 @@ class CurrentUser:
 
 def _current_user(db: Session, token: str) -> CurrentUser:
     """Сценарий входа запроса: introspection → provisioning → проверки → флаг СА."""
-    info = auth_uc.introspect_token(token)
-    user = auth_uc.upsert_user_from_token(db, info)
-    auth_uc.ensure_active(user)
+    info = introspect_token(token)
+    user = upsert_user_from_token(db, info)
+    ensure_active(user)
     db.commit()
-    return CurrentUser(user, info, auth_uc.is_super(db, user))
+    return CurrentUser(user, info, is_super(db, user))
 
 
 async def get_current_user(request: Request, db: Session = Depends(get_db)) -> CurrentUser:

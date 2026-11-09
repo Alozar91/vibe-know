@@ -1,4 +1,4 @@
-# Вспомогательные операции сценарного слоя: проверка прав СА (FR-104) и разбор UUID.
+# Общие хелперы сценарного слоя: права СА (FR-104), разбор UUID, выборка/валидация.
 import uuid
 
 from sqlalchemy import select
@@ -37,3 +37,17 @@ def get_role_or_404(db: Session, role_id: str) -> models.Role:
     if r is None:
         raise not_found("Роль не найдена")
     return r
+
+
+def validate_permissions(permissions: list[str]) -> list[models.PermissionCode]:
+    """Каталог прав FR-106: неизвестный код — VALIDATION_ERROR (LLD §12.2)."""
+    codes = []
+    for p in set(permissions):
+        try:
+            codes.append(models.PermissionCode(p))
+        except ValueError:
+            raise DomainError(
+                status=400, code="VALIDATION_ERROR", title="Ошибка валидации запроса",
+                detail=f"Неизвестное право: {p}",
+            )
+    return codes

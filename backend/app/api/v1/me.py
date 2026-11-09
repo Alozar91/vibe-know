@@ -1,4 +1,4 @@
-# /me — профиль из токена (LLD §12.3, FR-151).
+# /me — профиль из токена (LLD §12.3, FR-151). Транспорт: без бизнес-логики.
 from fastapi import APIRouter
 
 from app.api.deps import CurrentUserDep

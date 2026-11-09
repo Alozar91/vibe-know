@@ -55,6 +55,7 @@ Code: pytest per stage; API acceptance against SCENARIOS US steps. `docker compo
 - Docker Desktop on this machine lives at `C:\Program Files\Docker\Docker\Docker Desktop.exe` (not LOCALAPPDATA); start it manually before compose work — the daemon takes ~1 min to come up. WSL2 distro: Ubuntu, WSL version 2.
 - Local toolchain: uv 0.11.x, Node 24 LTS (npm 10.x), Python 3.15 — HLD §4 container versions still govern; local versions only for dev ergonomics.
 - Main branch is `master` (no `main`); `docs` branch is a stale copy of the same commit.
+- Compose gotchas (discovered stage 1): host port 8000 is occupied by a foreign process → api is mapped to 8001; `minio/mc` is gone from Docker Hub → use `pgsty/mc`; postgres 18 mounts at `/var/lib/postgresql` (not `.../data`); Gotenberg image has no wget/curl (healthcheck = `kill -0 1`); Keycloak has no curl (healthcheck = /dev/tcp probe of mgmt 9000); realm import skips silently if realm already exists in DB (change passwords → `docker compose down -v` or kcadm `set-password`); realm JSON field names are strict (`resetPasswordAllowed`, no `maxTemporaryLockoutMinutes`); realm `passwordPolicy` applies to imported seed users' passwords.
 
 ## Maintenance
 

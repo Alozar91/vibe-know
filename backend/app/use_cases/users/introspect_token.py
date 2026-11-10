@@ -37,12 +37,17 @@ def _call_introspection(token: str) -> dict[str, Any]:
 def introspect_token(token: str) -> dict[str, Any]:
     """Интроспекция на каждый запрос без кэша (HLD §6.1, Приложение А №12).
 
-    1 повтор при сетевом сбое (LLD §10); не-200/active=false → 401 (fail-closed).
+    1 повтор при сетевом сбое (LLD §10); не-200/active=false/нет sub → 401 (fail-closed).
     """
     try:
-        return _call_introspection(token)
+        info = _call_introspection(token)
     except httpx.HTTPError:
         try:
-            return _call_introspection(token)
+            info = _call_introspection(token)
         except httpx.HTTPError:
             raise _fail("Сервис аутентификации недоступен")
+    # Истёкший/отозванный токен: Keycloak отвечает 200 {"active": false} без sub
+    # (LLD §10 — fail-closed; ранее падал KeyError 'sub' → 500).
+    if not info.get("active") or not info.get("sub"):
+        raise _fail("Токен недействителен")
+    return info

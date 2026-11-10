@@ -23,7 +23,7 @@ router = APIRouter(tags=["notifications"])
 
 
 @router.get("/notifications")
-async def list_notifications_ep(
+def list_notifications_ep(
     user: CurrentUserDep,
     unread_only: bool = False,
     page: int = 1,
@@ -35,13 +35,13 @@ async def list_notifications_ep(
 
 
 @router.get("/notifications:unread-count")
-async def unread_count_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> dict:
+def unread_count_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> dict:
     """Счётчик непрочитанных для шапки UI (FR-137)."""
     return {"unread": unread_count(db, user)}
 
 
 @router.post("/notifications/{notification_id}:read")
-async def mark_read_ep(
+def mark_read_ep(
     notification_id: str, user: CurrentUserDep, db: Session = Depends(get_db)
 ) -> dict:
     """Отметить уведомление прочитанным (US-039 ш.3, FR-137)."""
@@ -49,7 +49,7 @@ async def mark_read_ep(
 
 
 @router.post("/notifications:read-all")
-async def mark_all_read_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> dict:
+def mark_all_read_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> dict:
     """Отметить все свои уведомления прочитанными (FR-137)."""
     return mark_all_read(db, user)
 
@@ -70,7 +70,7 @@ def _require_super(is_super: bool) -> None:
 
 
 @router_triggers.get("/notification-triggers")
-async def list_triggers_ep(
+def list_triggers_ep(
     user: CurrentUserDep, db: Session = Depends(get_db)
 ) -> list[dict]:
     """Матрица «триггер → типы получателей» (US-047 ш.1, FR-134/135)."""
@@ -79,7 +79,7 @@ async def list_triggers_ep(
 
 
 @router_triggers.put("/notification-triggers/{event_type}")
-async def update_trigger_ep(
+def update_trigger_ep(
     event_type: str,
     body: TriggerIn,
     user: CurrentUserDep,

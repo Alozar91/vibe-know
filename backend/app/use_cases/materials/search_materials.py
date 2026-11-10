@@ -7,7 +7,9 @@
 import json
 from datetime import datetime
 
-from sqlalchemy import func, or_, select, cast
+from typing import Any
+
+from sqlalchemy import and_, case, func, literal, or_, select, cast, text
 from sqlalchemy.orm import Session, aliased
 
 from app.db import models
@@ -98,35 +100,38 @@ def search_materials(
     from sqlalchemy.dialects.postgresql import REGCONFIG
 
     text_conds = []
+    tsq_by_cfg: dict[str, Any] = {}
     if q:
         if is_pg:
             # websearch_to_tsquery(search_lang::regconfig, q) — конфигурация
             # материала (FR-122/9.7); не бросает синтаксических ошибок (§7.3).
-            # cast в regconfig обязателен: колонка varchar — PG не приводит
-            # varchar → regconfig неявно.
-            tsquery = func.websearch_to_tsquery(cast(M.search_lang, REGCONFIG), q)
-            text_conds.append(M.search_tsv.op("@@")(tsquery))
+            # Этап 11 (NFR-001): tsquery в форме «от колонки» (cast(m.search_lang…))
+            # не извлекается в условие GIN-индекса → merge join по всей таблице
+            # (p95 поиска 10 с). Раскладываем по distinct search_lang: константный
+            # конфиг → GIN BitmapOr; семантика «конфигурация материала» та же.
+            configs = db.execute(select(M.search_lang).distinct()).scalars().all()
+            for cfg in configs:
+                tsq_by_cfg[cfg] = func.websearch_to_tsquery(cast(literal(cfg), REGCONFIG), q)
+                text_conds.append(
+                    and_(M.search_lang == cfg, M.search_tsv.op("@@")(tsq_by_cfg[cfg]))
+                )
             if partial:
                 threshold = _setting(db, "trgm_similarity_threshold", 0.3)
                 short_len = _setting(db, "short_query_min_len", 3)
                 # FR-114: «парацет» находит «Парацетамол» — ILIKE по подстроке
-                # (ускоряется тем же GIN trgm-индексом, §7.2). similarity —
-                # дополнительно (опечатки/сходство всей строки). LLD §7.3
-                # ограничивал ILIKE короткими запросами — см. Приложение А:
-                # `%` по всей строке не находит подстроку в длинном названии.
-                if len(q) < short_len:
-                    # короткие: только ILIKE (similarity на «абв» бессмысленна)
-                    text_conds.append(or_(
-                        M.name.ilike(f"%{q}%"),
-                        M.text_content.ilike(f"%{q}%"),
-                    ))
-                else:
-                    text_conds.append(or_(
-                        M.name.ilike(f"%{q}%"),
-                        M.text_content.ilike(f"%{q}%"),
-                        func.similarity(M.name, q) > threshold,
-                        func.similarity(func.coalesce(M.text_content, ""), q) > threshold,
-                    ))
+                # (ускоряется тем же GIN trgm-индексом, §7.2 [уточнение LLD] —
+                # Приложение А №30) и name % q (pg_trgm similarity, оператор —
+                # индексируем; Приложение А №36: similarity(text_content, q) для
+                # длинных текстов математически недостижима (порог 0.3), а её
+                # неиндексируемая форма давала seq scan → p95 11 с).
+                # Порог оператора % — тот же параметр реестра (§2.5).
+                if len(q) >= short_len:
+                    db.execute(text(f"SET LOCAL pg_trgm.similarity_threshold = {float(threshold)}"))
+                # короткие: только ILIKE (trgm-similarity на «абв» бессмысленна)
+                conds = [M.name.ilike(f"%{q}%"), M.text_content.ilike(f"%{q}%")]
+                if len(q) >= short_len:
+                    conds.append(M.name.op("%")(q))
+                text_conds.append(or_(*conds))
         else:
             # SQLite: ILIKE-ветка (контракт/права; FTS-семантика — на живом стеке)
             text_conds.append(M.name.ilike(f"%{q}%"))
@@ -137,36 +142,54 @@ def search_materials(
 
     # --- Сортировка (FR-117, §7.4) ---
     if q and sort == "relevance" and is_pg:
-        # 0.7 * ts_rank + 0.3 * similarity ([уточнение LLD], §14-1)
-        tsquery2 = func.websearch_to_tsquery(cast(M.search_lang, REGCONFIG), q)
-        relevance = (
-            0.7 * func.ts_rank(M.search_tsv, tsquery2)
-            + 0.3 * func.similarity(M.name, q)
+        # 0.7 * ts_rank + 0.3 * similarity ([уточнение LLD], §14-1);
+        # ts_rank — с константным tsquery раскладки по конфигам (выше).
+        def _rank(cfg: str) -> Any:
+            return func.ts_rank(M.search_tsv, tsq_by_cfg[cfg])
+
+        relevance = case(
+            *[(and_(M.search_lang == cfg), _rank(cfg)) for cfg in tsq_by_cfg],
+            else_=0.0,
         )
+        relevance = 0.7 * relevance + 0.3 * func.similarity(M.name, q)
         stmt = stmt.order_by(relevance.desc() if order == "desc" else relevance.asc(), M.id)
     else:
         col = _sort_field(sort if sort != "relevance" else "updated_at")
         stmt = stmt.order_by(col.desc() if order == "desc" else col.asc(), M.id)
 
     # --- Пагинация (FR-121) + total (COUNT по предикату, §7.4) ---
-    total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+    # Этап 11 (NFR-001): COUNT — по подзапросу БЕЗ ORDER BY: иначе PG вычисляет
+    # ts_rank/similarity и сортирует все совпавшие строки ради подсчёта.
+    count_stmt = stmt.order_by(None) if q and sort == "relevance" else stmt
+    total = db.execute(select(func.count()).select_from(count_stmt.subquery())).scalar_one()
     rows = db.execute(stmt.offset((page - 1) * per_page).limit(per_page)).scalars().all()
+
+    # Подсветка (FR-118): один батч-запрос по id страницы (этап 11: прежний N+1
+    # — 20 отдельных round-trips на поиск — давал латентность под нагрузкой);
+    # название подсвечивает клиент (§7.4)
+    headlines: dict[str, str] = {}
+    if q and is_pg and rows:
+        from sqlalchemy.dialects.postgresql import REGCONFIG
+
+        hl_conf = cast(models.Material.search_lang, REGCONFIG)
+        hl_rows = db.execute(
+            select(
+                models.Material.id,
+                func.ts_headline(
+                    hl_conf,
+                    func.coalesce(models.Material.text_content, ""),
+                    func.websearch_to_tsquery(hl_conf, q),
+                    HEADLINE_OPTS,
+                ),
+            ).where(models.Material.id.in_([m.id for m in rows]))
+        ).all()
+        headlines = {str(mid): hl for mid, hl in hl_rows}
 
     items = []
     for m in rows:
         item = to_list_item(m)
         if q and is_pg:
-            # Подсветка (FR-118): фрагмент текста; название — клиент (§7.4)
-            from sqlalchemy.dialects.postgresql import REGCONFIG
-
-            item["headline"] = db.execute(
-                select(func.ts_headline(
-                    cast(m.search_lang, REGCONFIG),
-                    func.coalesce(m.text_content, ""),
-                    func.websearch_to_tsquery(cast(m.search_lang, REGCONFIG), q),
-                    HEADLINE_OPTS,
-                ))
-            ).scalar_one()
+            item["headline"] = headlines.get(str(m.id), "")
         items.append(item)
 
     # --- Аналитика (§7.6, FR-127): факт запроса; id — для search_opens ---

@@ -2,16 +2,16 @@
 # Задачи — этапы 6/9/10; на этапе 1 воркер поднимается пустым (готовность инфраструктуры).
 import threading
 
-from prometheus_client import start_http_server
-
 from app.logging import configure_logging, get_logger
 from app.worker import celery_app
+from app.worker.metrics import start_metrics_server
 
 log = get_logger(__name__)
 
 
 def _serve_metrics() -> None:
-    start_http_server(9808)
+    # Метрики очередей (глубина/возраст/доля ошибок из system_tasks) + сервер :9808
+    start_metrics_server()
 
 
 def main() -> None:

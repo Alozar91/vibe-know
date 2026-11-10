@@ -12,18 +12,37 @@ x-logging: &default-logging
 
 services:
   postgres:
-    image: postgres:18.6
+    # Этап 11 (NFR-012): образ с pgbackrest (PGDG) поверх postgres:18.6 —
+    # archive_command вызывает pgbackrest archive-push (WAL → том backups),
+    # pgbackrest.sh ведёт цикл базовых копий (полная вс / инкременты пн-сб).
+    # pgbackrest требует локальное соединение с кластером → копии выполняются
+    # здесь же (обёртка docker-entrypoint: postgres + pgbackrest.sh).
+    build:
+      context: ./backup
+      dockerfile: Dockerfile
+    image: kb-pg-backup-tools:18.6
     container_name: kb-postgres
     logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+    entrypoint:
+      [
+        "/bin/bash",
+        "-c",
+        # Фоновый цикл pgBackRest от postgres (pgBackRest запрещает root);
+        # затем штатный entrypoint postgres (сам понижает права через gosu)
+        "docker-ensure-initdb.sh true >/dev/null 2>&1; su postgres -s /bin/bash -c '/usr/local/bin/pgbackrest.sh' & exec docker-entrypoint.sh postgres -c archive_mode=on -c \"archive_command=test ! -f /backups/pgbackrest/wal/kb/%f && pgbackrest --stanza=kb archive-push %p\" -c archive_timeout=60s -c max_connections=250 -c plan_cache_mode=force_custom_plan",
+      ]
     volumes:
-      # PG18: монтируем /var/lib/postgresql (данные в major-версионном подкаталоге,
+      # PG18: монтируем /var/lib/pgdata postgres (данные в major-версионном подкаталоге,
       # см. docker-library/postgres#37) — совместимо с будущими pg_upgrade
       - pgdata:/var/lib/postgresql
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      # WAL-архив (NFR-12): archive_command пишет сегменты в том backups
+      - backups:/backups
     ports:
       - "5432:5432"
     healthcheck:
@@ -53,7 +72,8 @@ services:
       # Hostname v2: issuer фиксирован (http://localhost:8080/realms/kb). Строгий режим
       # обязателен: при strict=false hostname резолвится из Host-заголовка, и introspection
       # через внутренний URL (Host: keycloak:8080) даёт iss-несоответствие → active:false
-      # (keycloak/keycloak#15694).
+      # (keycloak/keycloak#15694). TLS/prod-режим (https://localhost/auth за nginx) —
+      # при внедрении (шаг [6], инструкция deploy/README.md).
       KC_HOSTNAME: http://localhost:8080
       KC_HOSTNAME_STRICT: "true"
       KC_PROXY_HEADERS: xforwarded
@@ -248,6 +268,7 @@ services:
       - worker
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - promdata:/prometheus
     ports:
       - "9090:9090"
@@ -274,14 +295,17 @@ services:
     logging: *default-logging
     command:
       - "--path.rootfs=/host"
+      # Свежесть бэкапов (NFR-019): textfile-файл от контейнера backup
+      - "--collector.textfile.directory=/backups/prometheus"
     volumes:
       - /:/host:ro
+      - backups:/backups:ro
     pid: "host"
     ports:
       - "9100:9100"
     restart: unless-stopped
 
-  # Alertmanager: канал алертинга — email СА (NFR-19); SMTP настраивается при внедрении,
+  # Alertmanager: канал алертинга — email СА (NFR-019); SMTP настраивается при внедрении,
   # до этого алертинг отключён (US-040 A1) — заглушка с пустым приёмником.
   alertmanager:
     image: prom/alertmanager:v0.29.0
@@ -293,8 +317,64 @@ services:
       - "9093:9093"
     restart: unless-stopped
 
+  # blackbox-exporter: HTTP/TCP-пробы сервисов без экспозера метрик (NFR-019,
+  # HLD §8.3 «Доступность сервисов») — keycloak/converter/silo/nginx/valkey.
+  blackbox:
+    image: prom/blackbox-exporter:v0.28.0
+    container_name: kb-blackbox
+    logging: *default-logging
+    restart: unless-stopped
+
+  # Однократная подготовка тома backups (владелец — postgres uid 999): pgBackRest
+  # (postgres-контейнер) и restic (контейнер backup) работают от postgres
+  # (pgBackRest запрещает root).
+  backup-init:
+    image: kb-pg-backup-tools:18.6
+    container_name: kb-backup-init
+    user: root
+    volumes:
+      - backups:/backups
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      [
+        "-c",
+        "mkdir -p /backups/pgbackrest /backups/restic /backups/prometheus /backups/status && chown -R 999:999 /backups && echo backup-init: OK",
+      ]
+    restart: "no"
+
+  # Бэкап-контур (этап 11, NFR-012, HLD §8.2): pgBackRest — WAL-архив (непрерывно,
+  # RPO ≤ 1 ч) + базовые копии (полная еженедельно, инкременты ежедневно);
+  # restic — снапшоты тома silo сразу после копии БД (согласование по времени —
+  # единая точка восстановления). Stanza kb = весь кластер PG (БД kb + keycloak).
+  # Свежесть копий — textfile-файл для node-exporter (алерты BackupStale/Failed).
+  backup:
+    build:
+      context: ./backup
+      dockerfile: Dockerfile
+    container_name: kb-backup
+    logging: *default-logging
+    depends_on:
+      backup-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      silo:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      RESTIC_REPOSITORY: /backups/restic
+      RESTIC_PASSWORD: ${BACKUP_RESTIC_PASSWORD}
+    volumes:
+      # silo — только чтение (CAS-объекты неизменяемы, NFR-010)
+      - silodata:/silo-data:ro
+      - backups:/backups
+    # Цикл: ожидание маркера pgBackRest → restic → textfile (backup.sh)
+    restart: unless-stopped
+
 volumes:
   pgdata:
   valkeydata:
   silodata:
   promdata:
+  backups:

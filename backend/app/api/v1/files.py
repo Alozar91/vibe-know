@@ -11,7 +11,7 @@ router = APIRouter(tags=["files"])
 
 
 @router.post("/materials/{material_id}/file")
-async def upload_file_ep(
+def upload_file_ep(
     user: CurrentUserDep,
     material_id: str,
     file: UploadFile,
@@ -25,7 +25,7 @@ async def upload_file_ep(
     """
     from app.use_cases.files.upload_file import upload_file
 
-    data = await file.read()
+    data = file.file.read()  # sync: эндпоинт исполняется в threadpool
     result = upload_file(
         db, user, material_id, file.filename or "без-имени", data,
         text_update_choice=text_update_choice,
@@ -34,7 +34,7 @@ async def upload_file_ep(
 
 
 @router.get("/materials/{material_id}/file")
-async def download_file_ep(
+def download_file_ep(
     user: CurrentUserDep,
     material_id: str,
     request: Request,
@@ -109,7 +109,7 @@ async def download_file_ep(
 
 
 @router.get("/materials/{material_id}/pdf")
-async def download_pdf_ep(
+def download_pdf_ep(
     user: CurrentUserDep,
     material_id: str,
     request: Request,
@@ -145,7 +145,7 @@ async def download_pdf_ep(
 
 
 @router.get("/materials/{material_id}/file-state")
-async def file_state_ep(
+def file_state_ep(
     user: CurrentUserDep, material_id: str, db: Session = Depends(get_db)
 ) -> dict:
     """Состояние конвейера (§6.3, FR-058–061): опрос из карточки; без silo."""
@@ -166,7 +166,7 @@ async def file_state_ep(
 
 
 @router.get("/materials/{material_id}/text.md")
-async def download_text_ep(
+def download_text_ep(
     user: CurrentUserDep, material_id: str, db: Session = Depends(get_db)
 ):
     """Скачивание текстового представления .md (FR-107, 16.1-108): право download;

@@ -24,7 +24,7 @@ class HealthResponse(BaseModel):
 
 
 @router.get("/healthz")
-async def healthz() -> dict:
+def healthz() -> dict:
     """Живость: процесс отвечает (без обращения к зависимостям)."""
     return {"status": "ok"}
 

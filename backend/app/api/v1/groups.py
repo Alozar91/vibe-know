@@ -24,7 +24,7 @@ class GroupPatch(BaseModel):
 
 
 @router.get("/groups")
-async def list_groups_ep(
+def list_groups_ep(
     user: CurrentUserDep, db: Session = Depends(get_db)
 ) -> list[dict]:
     """Дерево групп (FR-015); удалённые — этап 10 (US-050)."""
@@ -32,7 +32,7 @@ async def list_groups_ep(
 
 
 @router.get("/groups/deleted")
-async def deleted_groups(user: CurrentUserDep, db: Session = Depends(get_db)) -> list[dict]:
+def deleted_groups(user: CurrentUserDep, db: Session = Depends(get_db)) -> list[dict]:
     """Удалённые группы — служебный раздел (FR-021, US-050; просмотр — СА)."""
     from app.use_cases.common import require_super
 
@@ -41,7 +41,7 @@ async def deleted_groups(user: CurrentUserDep, db: Session = Depends(get_db)) ->
 
 
 @router.get("/groups/{group_id}")
-async def get_group_ep(user: CurrentUserDep, group_id: str, db: Session = Depends(get_db)) -> dict:
+def get_group_ep(user: CurrentUserDep, group_id: str, db: Session = Depends(get_db)) -> dict:
     """Карточка группы (FR-016)."""
     from app.use_cases.common import get_group_or_404
     from app.use_cases.groups.dto import to_out
@@ -51,7 +51,7 @@ async def get_group_ep(user: CurrentUserDep, group_id: str, db: Session = Depend
 
 
 @router.post("/groups", status_code=201)
-async def create_group_ep(user: CurrentUserDep, body: GroupIn, db: Session = Depends(get_db)) -> dict:
+def create_group_ep(user: CurrentUserDep, body: GroupIn, db: Session = Depends(get_db)) -> dict:
     """Создание группы (FR-015/016, US-052 шаг 1) — СА."""
     from app.use_cases.groups.create_group import create_group as uc
 
@@ -59,7 +59,7 @@ async def create_group_ep(user: CurrentUserDep, body: GroupIn, db: Session = Dep
 
 
 @router.patch("/groups/{group_id}")
-async def rename_group_ep(
+def rename_group_ep(
     user: CurrentUserDep, group_id: str, body: GroupPatch, db: Session = Depends(get_db)
 ) -> dict:
     """Переименование (FR-015, US-052 шаг 3) — СА."""
@@ -69,7 +69,7 @@ async def rename_group_ep(
 
 
 @router.delete("/groups/{group_id}")
-async def delete_group_ep(
+def delete_group_ep(
     user: CurrentUserDep, group_id: str, confirm_rights: bool = False,
     db: Session = Depends(get_db),
 ) -> dict:

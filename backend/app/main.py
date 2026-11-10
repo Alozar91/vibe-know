@@ -36,6 +36,9 @@ def create_app() -> FastAPI:
     # Конвенции ошибок RFC 7807 + доменные коды (LLD §12.1/12.2)
     register_exception_handlers(app)
 
+    # Метрики API: запросы/латентность/5xx (NFR-019, HLD §8.3) — до маршрутов
+    register_metrics_middleware(app)
+
     # REST API /api/v1 (FR-130)
     app.include_router(api_router, prefix="/api/v1")
 
@@ -131,6 +134,54 @@ def register_exception_handlers(app: FastAPI) -> None:
 
 async def _log_4xx(request, exc):
     log.info("api.validation_error", path=request.url.path)
+
+
+def register_metrics_middleware(app: FastAPI) -> None:
+    """HTTP-метрики на каждый запрос (NFR-019): счётчик, латентность, in-progress.
+
+    Шаблон маршрута (path) вместо фактического URL — чтобы не плодить серии на
+    каждый id материала/группы (cardinality). Нормализация: uuid/цифры → {id}.
+    """
+    import re
+    import time
+
+    from fastapi import Request, Response
+
+    from app.api.metrics import IN_PROGRESS, observe
+
+    _uuid_re = re.compile(
+        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    )
+    _digits_re = re.compile(r"^\d+$")
+
+    def _norm(seg: str) -> str:
+        if _uuid_re.match(seg) or _digits_re.match(seg):
+            return "{id}"
+        return seg
+
+    @app.middleware("http")
+    async def metrics_middleware(request: Request, call_next) -> Response:
+        method = request.method
+        IN_PROGRESS.labels(method=method).inc()
+        start = time.perf_counter()
+        try:
+            response = await call_next(request)
+            status = response.status_code
+        except Exception:
+            status = 500
+            raise
+        finally:
+            elapsed = time.perf_counter() - start
+            IN_PROGRESS.labels(method=method).dec()
+            # Нормализуем path сегментами (быстрее, чем разбор route-объектов)
+            raw_path = request.scope.get("path", "")
+            norm = "/".join(_norm(s) for s in raw_path.split("/") if s != "")
+            norm = "/" + norm if norm else raw_path
+            # /metrics и health-пробы не считаем (самоскрейп искажает картину)
+            if norm not in ("/metrics", "/healthz", "/readyz"):
+                observe(method, norm, status, elapsed)
+        return response
+
 
 
 app = create_app()

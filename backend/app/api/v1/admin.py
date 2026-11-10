@@ -34,7 +34,7 @@ def _require(is_super: bool) -> None:
 
 
 @router.get("/audit")
-async def audit_ep(
+def audit_ep(
     user: CurrentUserDep,
     page: int = 1,
     per_page: int = Query(50, le=200),
@@ -52,7 +52,7 @@ async def audit_ep(
 
 
 @router.get("/audit/export")
-async def audit_export_ep(
+def audit_export_ep(
     user: CurrentUserDep,
     action: str | None = None,
     object_type: str | None = None,
@@ -79,13 +79,13 @@ class SettingIn(BaseModel):
 
 
 @router.get("/settings")
-async def settings_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> list[dict]:
+def settings_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> list[dict]:
     _require(user.is_super)
     return list_settings(db, True)
 
 
 @router.put("/settings/{key}")
-async def update_setting_ep(
+def update_setting_ep(
     key: str, body: SettingIn, user: CurrentUserDep, db: Session = Depends(get_db)
 ) -> dict:
     _require(user.is_super)
@@ -96,7 +96,7 @@ async def update_setting_ep(
 
 
 @router.get("/service-tasks")
-async def service_tasks_ep(
+def service_tasks_ep(
     user: CurrentUserDep, all: bool = False, db: Session = Depends(get_db)
 ) -> list[dict]:
     _require(user.is_super)
@@ -104,7 +104,7 @@ async def service_tasks_ep(
 
 
 @router.post("/service-tasks/{task_id}:close")
-async def close_service_task_ep(
+def close_service_task_ep(
     task_id: str, user: CurrentUserDep, db: Session = Depends(get_db)
 ) -> dict:
     _require(user.is_super)
@@ -112,7 +112,7 @@ async def close_service_task_ep(
 
 
 @router.get("/tasks")
-async def tasks_ep(
+def tasks_ep(
     user: CurrentUserDep, limit: int = Query(100, le=500), db: Session = Depends(get_db)
 ) -> dict:
     _require(user.is_super)

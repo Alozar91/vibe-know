@@ -39,7 +39,10 @@ def _current_user(db: Session, token: str) -> CurrentUser:
     return CurrentUser(user, info, is_super(db, user))
 
 
-async def get_current_user(request: Request, db: Session = Depends(get_db)) -> CurrentUser:
+def get_current_user(request: Request, db: Session = Depends(get_db)) -> CurrentUser:
+    """Синхронная зависимость: FastAPI исполняет её в threadpool вместе с
+    эндпоинтами (introspection + БД — блокирующие вызовы; async-обёртка здесь
+    монополизировала бы event loop под нагрузкой — находка этапа 11)."""
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise DomainError(

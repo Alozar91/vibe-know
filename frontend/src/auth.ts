@@ -129,6 +129,26 @@ export function logout(): void {
   logoutRedirect()
 }
 
+// Тестовая регистрация (НЕ для продуктива): auth-запрос с kc_action=register —
+// Keycloak 26 показывает встроенную форму регистрации, после чего продолжает
+// вход и возвращает code в SPA (completeLogin). Прямой URL /login-actions/
+// registrations без контекста аутентификации даёт «Page not found».
+export async function register(): Promise<void> {
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)))
+  const challenge = b64url(await sha256(verifier))
+  sessionStorage.setItem('pkce_verifier', verifier)
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: 'code',
+    scope: 'openid profile email',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    kc_action: 'register',
+  })
+  window.location.href = `${KC_BASE}/protocol/openid-connect/auth?${params}`
+}
+
 // --- API-клиент: Bearer + problem+json (LLD §12.1) ---
 
 export class ApiError extends Error {

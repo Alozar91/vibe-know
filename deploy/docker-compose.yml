@@ -189,6 +189,9 @@ services:
       KB_OIDC_CLIENT_ID: kb-api
       KB_OIDC_CLIENT_SECRET: ${KB_API_CLIENT_SECRET}
       KB_FRONTEND_URL: http://localhost
+      # Тестовая регистрация с выбором роли (НЕ для продуктива): задаётся только
+      # на тестовом стенде; пусто/false — функция выключена
+      KB_TEST_REGISTRATION: ${KB_TEST_REGISTRATION:-false}
       KB_LOG_LEVEL: ${LOG_LEVEL}
     ports:
       # 8000 на хосте занят сторонним процессом — хост-маппинг 8001 (внутри сети — 8000)

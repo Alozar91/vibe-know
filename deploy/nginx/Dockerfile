@@ -10,6 +10,9 @@ WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
+# KB_PUBLIC_URL приходит из compose build.args (docker-compose.yml) —
+# здесь только объявление; без ARG переменная в RUN пуста всегда.
+ARG KB_PUBLIC_URL=""
 ARG VITE_APP_BASE=""
 # Адрес Keycloak для браузера — по схеме KB_PUBLIC_URL; VITE_APP_BASE — база
 # SPA (vite.config.ts: base + build.outDir = dist/<база>).

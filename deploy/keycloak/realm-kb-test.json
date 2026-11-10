@@ -24,10 +24,12 @@
       "serviceAccountsEnabled": false,
       "redirectUris": [
         "http://localhost/*",
+        "https://localhost/*",
         "http://localhost:5173/*"
       ],
       "webOrigins": [
         "http://localhost",
+        "https://localhost",
         "http://localhost:5173"
       ],
       "attributes": {

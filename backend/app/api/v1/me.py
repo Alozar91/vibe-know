@@ -7,7 +7,7 @@ router = APIRouter(tags=["me"])
 
 
 @router.get("/me")
-async def me(user: CurrentUserDep) -> dict:
+def me(user: CurrentUserDep) -> dict:
     """Профиль аутентифицированного участника (FR-151: минимум ПДн)."""
     return {
         "id": str(user.user_id),

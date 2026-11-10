@@ -1,6 +1,7 @@
 // Аутентификация SPA: Authorization Code + PKCE (HLD §6.1, LLD §10).
 // Клиент kb-spa (public, S256); токены — в памяти (не localStorage), refresh-токен.
-// Keycloak 26: /realms/kb/... ; на prod тот же origin через nginx.
+// Keycloak 26: /realms/kb/... ; при внедрении (шаг [6]) — /auth/... за nginx TLS
+// (инструкция deploy/README.md, FR-149).
 
 const KC_BASE = 'http://localhost:8080/realms/kb'
 const CLIENT_ID = 'kb-spa'

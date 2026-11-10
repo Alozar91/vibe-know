@@ -23,13 +23,13 @@ class DictionaryValueIn(BaseModel):
 
 
 @router.get("/dictionaries")
-async def list_dictionaries_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> list[dict]:
+def list_dictionaries_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> list[dict]:
     """Справочники со значениями (FR-047)."""
     return list_dictionaries(db)
 
 
 @router.post("/dictionaries", status_code=201)
-async def create_dictionary_ep(user: CurrentUserDep, body: DictionaryIn, db: Session = Depends(get_db)) -> dict:
+def create_dictionary_ep(user: CurrentUserDep, body: DictionaryIn, db: Session = Depends(get_db)) -> dict:
     """Создание справочника (US-033 шаг 1) — СА."""
     from app.use_cases.dictionaries.create_dictionary import create_dictionary as uc
 
@@ -37,7 +37,7 @@ async def create_dictionary_ep(user: CurrentUserDep, body: DictionaryIn, db: Ses
 
 
 @router.patch("/dictionaries/{dictionary_id}")
-async def rename_dictionary_ep(
+def rename_dictionary_ep(
     user: CurrentUserDep, dictionary_id: str, body: DictionaryIn, db: Session = Depends(get_db)
 ) -> dict:
     """Переименование справочника — СА."""
@@ -47,7 +47,7 @@ async def rename_dictionary_ep(
 
 
 @router.post("/dictionaries/{dictionary_id}/values", status_code=201)
-async def add_value_ep(
+def add_value_ep(
     user: CurrentUserDep, dictionary_id: str, body: DictionaryValueIn, db: Session = Depends(get_db)
 ) -> dict:
     """Добавление значения (US-033 шаг 1) — СА; свободный ввод пользователями запрещён (FR-047)."""
@@ -57,7 +57,7 @@ async def add_value_ep(
 
 
 @router.delete("/dictionaries/{dictionary_id}/values/{value_id}", status_code=204)
-async def delete_value_ep(
+def delete_value_ep(
     user: CurrentUserDep, dictionary_id: str, value_id: str, db: Session = Depends(get_db)
 ) -> None:
     """Удаление значения (FR-047: запрет при использовании) — СА."""

@@ -30,7 +30,7 @@ class MaterialPatch(BaseModel):
 
 
 @router.get("/materials")
-async def list_materials_ep(
+def list_materials_ep(
     user: CurrentUserDep,
     db: Session = Depends(get_db),
     group_id: str | None = None,
@@ -57,7 +57,7 @@ async def list_materials_ep(
 
 
 @router.get("/materials/deleted")
-async def deleted_materials_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> dict:
+def deleted_materials_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> dict:
     """Служебный раздел (FR-090) — только СА; полная реализация — этап 10."""
     from sqlalchemy import select
 
@@ -81,7 +81,7 @@ async def deleted_materials_ep(user: CurrentUserDep, db: Session = Depends(get_d
 
 
 @router.post("/materials", status_code=201)
-async def create_material_ep(user: CurrentUserDep, body: MaterialIn, db: Session = Depends(get_db)) -> dict:
+def create_material_ep(user: CurrentUserDep, body: MaterialIn, db: Session = Depends(get_db)) -> dict:
     """Создание (в т.ч. пустышка) — право create в группе (FR-024–026)."""
     from app.use_cases.lifecycle.audit import audit_log
     from app.use_cases.materials.create_material import create_material
@@ -99,7 +99,7 @@ async def create_material_ep(user: CurrentUserDep, body: MaterialIn, db: Session
 
 
 @router.get("/materials/{material_id}")
-async def get_material_ep(
+def get_material_ep(
     user: CurrentUserDep, material_id: str, db: Session = Depends(get_db)
 ):
     """Карточка (US-037): поля + атрибуты/теги + права (FR-129); ETag = версия."""
@@ -115,7 +115,7 @@ async def get_material_ep(
 
 
 @router.patch("/materials/{material_id}")
-async def update_material_ep(
+def update_material_ep(
     user: CurrentUserDep, material_id: str, body: MaterialPatch,
     if_match: str | None = Header(default=None, alias="If-Match"),
     db: Session = Depends(get_db),
@@ -143,7 +143,7 @@ def json_dumps(obj) -> str:
 
 
 @router.delete("/materials/{material_id}")
-async def delete_material_ep(
+def delete_material_ep(
     user: CurrentUserDep, material_id: str,
     if_match: str | None = Header(default=None, alias="If-Match"),
     db: Session = Depends(get_db),
@@ -190,7 +190,7 @@ class CommentIn(BaseModel):
 
 
 @router.post("/materials/{material_id}/children", status_code=201)
-async def create_child_ep(
+def create_child_ep(
     user: CurrentUserDep, material_id: str, body: ChildIn,
     db: Session = Depends(get_db),
 ) -> dict:
@@ -204,7 +204,7 @@ async def create_child_ep(
 
 
 @router.post("/materials/{material_id}/master")
-async def change_master_ep(
+def change_master_ep(
     user: CurrentUserDep, material_id: str, body: MasterIn,
     db: Session = Depends(get_db),
 ) -> dict:
@@ -215,7 +215,7 @@ async def change_master_ep(
 
 
 @router.delete("/materials/{material_id}/master")
-async def detach_master_ep(
+def detach_master_ep(
     user: CurrentUserDep, material_id: str, db: Session = Depends(get_db),
 ) -> dict:
     """Отвязка от мастера (FR-036; US-026 п.5); 16.1-111 — без события."""
@@ -225,7 +225,7 @@ async def detach_master_ep(
 
 
 @router.post("/materials/{material_id}/move")
-async def move_material_ep(
+def move_material_ep(
     user: CurrentUserDep, material_id: str, body: MoveIn,
     db: Session = Depends(get_db),
 ) -> dict:
@@ -236,7 +236,7 @@ async def move_material_ep(
 
 
 @router.post("/materials/{material_id}/copy", status_code=201)
-async def copy_material_ep(
+def copy_material_ep(
     user: CurrentUserDep, material_id: str, body: CopyIn,
     db: Session = Depends(get_db),
 ) -> dict:
@@ -247,7 +247,7 @@ async def copy_material_ep(
 
 
 @router.get("/materials/{material_id}/comments")
-async def list_comments_ep(
+def list_comments_ep(
     user: CurrentUserDep, material_id: str, db: Session = Depends(get_db),
 ) -> dict:
     """Комментарии (FR-096/097; US-038): чтение — видимость материала."""
@@ -257,7 +257,7 @@ async def list_comments_ep(
 
 
 @router.post("/materials/{material_id}/comments", status_code=201)
-async def add_comment_ep(
+def add_comment_ep(
     user: CurrentUserDep, material_id: str, body: CommentIn,
     db: Session = Depends(get_db),
 ) -> dict:

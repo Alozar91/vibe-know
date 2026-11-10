@@ -1,0 +1,142 @@
+# Правила алертинга (NFR-019, HLD §8.3): доступность сервисов, очереди, диски,
+# свежесть бэкапов, ошибки 5xx, латентность p95. Канал — email СА (alertmanager;
+# SMTP не настроен → приёмник-заглушка US-040 A1; алерты видны в Prometheus /alerts).
+groups:
+  - name: availability
+    rules:
+      # Экспортируемые цели: недоступность > 2 мин
+      - alert: ServiceDown
+        expr: up{job=~"api|worker|postgres|node"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Сервис {{ $labels.job }} недоступен ({{ $labels.instance }})"
+          description: "Скрейп {{ $labels.job }} не отвечает более 2 минут — проверить контейнер (docker compose ps)."
+
+      # Сервисы без экспозера метрик — HTTP-пробы (blackbox-логика в prometheus.yml)
+      - alert: KeycloakDown
+        expr: probe_success{job="keycloak"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Keycloak недоступен более 2 минут"
+          description: "Аутентификация не работает (вход и introspection дают 401 — fail-closed)."
+      - alert: ConverterDown
+        expr: probe_success{job="converter"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gotenberg (конвертер PDF) недоступен более 5 минут"
+          description: "Конвертация офисных форматов не выполняется, задачи копятся (NFR-006)."
+      - alert: SiloDown
+        expr: probe_success{job="silo"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Silo (CAS-хранилище) недоступен более 2 минут"
+          description: "Загрузка/скачивание файлов не работают (NFR-010)."
+      - alert: ValkeyDown
+        expr: probe_success{job="valkey"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Valkey (брокер очередей) недоступен более 2 минут"
+          description: "Фоновые задачи не выполняются; reconcile при старте worker восстановит очередь из БД (NFR-014)."
+      - alert: NginxDown
+        expr: probe_success{job="nginx"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "nginx (точка входа) недоступен более 2 минут"
+          description: "Веб-клиент и API недоступны пользователям."
+  - name: queues
+    rules:
+      # Застой: старейшая queued-задача старше 30 мин при непустой очереди
+      - alert: QueueStuck
+        expr: |
+          max by (task_type) (kb_queue_age_seconds) > 1800
+          and on (task_type) (max by (task_type) (kb_queue_depth{state="queued"}) > 0)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Очередь {{ $labels.task_type }} стоит ≥30 мин (возраст старейшей задачи)"
+          description: "Задачи не берутся в работу — известная проблема Celery-child: docker compose restart worker."
+      - alert: QueueDepthGrowing
+        expr: max by (task_type) (kb_queue_depth{state=~"queued|running|failing"}) > 50
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Глубина очереди {{ $labels.task_type }} > 50 более 15 мин"
+          description: "Очередь не разгребается (NFR-019)."
+      - alert: QueueErrorRatio
+        expr: kb_queue_error_ratio{task_type=~"antivirus|conversion|email"} > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Доля ошибок {{ $labels.task_type }} > 20% за окно"
+          description: "Массовые отказы конвейера файлов (антивирус/конвертация/email)."
+  - name: app
+    rules:
+      - alert: Api5xxRate
+        expr: |
+          sum by (path) (rate(kb_api_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum by (path) (rate(kb_api_requests_total[5m])), 0.001) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "5xx на {{ $labels.path }} > 5% запросов за 10 мин"
+          description: "Ошибки сервера в API — смотреть логи api (HLD §8.3)."
+      - alert: ApiLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum by (le, path) (rate(kb_api_request_latency_seconds_bucket[5m]))) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 латентности {{ $labels.path }} > 2 с за 10 мин"
+          description: "Деградация отклика API — цель НФТ p95 ≤ 2 с (NFR-001/003/004)."
+      - alert: NotificationsBacklog
+        expr: kb_queue_depth{task_type="email",state=~"queued|failing"} > 20
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Доставка email-уведомлений стоит > 20 задач более 15 мин"
+          description: "SMTP недоступен или worker не обрабатывает (NFR-007, US-040)."
+  - name: disks
+    rules:
+      - alert: DiskUsageHigh
+        expr: |
+          (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/"}) > 0.85
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Заполненность диска узла > 85%"
+          description: "Тома БД и silo на одном узле (single-node) — расширить/очистить (NFR-019)."
+  - name: backups
+    rules:
+      - alert: BackupStale
+        expr: kb_backup_freshness_seconds > 90000
+        labels:
+          severity: warning
+        annotations:
+          summary: "Последняя успешная копия старше 25 ч (расписание — раз в сутки)"
+          description: "Резервное копирование не выполнялось — проверить контейнер kb-backup (NFR-012, HLD §8.2)."
+      - alert: BackupFailed
+        expr: kb_backup_failed > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ошибка резервного копирования (pgBackRest/restic)"
+          description: "Логи: docker compose logs backup (NFR-012)."

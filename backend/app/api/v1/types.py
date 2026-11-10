@@ -25,13 +25,13 @@ class TypePatch(BaseModel):
 
 
 @router.get("/types")
-async def list_types_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> list[dict]:
+def list_types_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> list[dict]:
     """Типы материалов с атрибутами (FR-043)."""
     return list_types(db)
 
 
 @router.post("/types", status_code=201)
-async def create_type_ep(user: CurrentUserDep, body: TypeIn, db: Session = Depends(get_db)) -> dict:
+def create_type_ep(user: CurrentUserDep, body: TypeIn, db: Session = Depends(get_db)) -> dict:
     """Создание типа (FR-043, US-030 шаг 2) — СА."""
     from app.use_cases.types.create_type import create_type as uc
 
@@ -39,7 +39,7 @@ async def create_type_ep(user: CurrentUserDep, body: TypeIn, db: Session = Depen
 
 
 @router.patch("/types/{type_id}")
-async def rename_type_ep(
+def rename_type_ep(
     user: CurrentUserDep, type_id: str, body: TypePatch, db: Session = Depends(get_db)
 ) -> dict:
     """Переименование типа (FR-043) — СА."""
@@ -49,7 +49,7 @@ async def rename_type_ep(
 
 
 @router.delete("/types/{type_id}", status_code=204)
-async def delete_type_ep(user: CurrentUserDep, type_id: str, db: Session = Depends(get_db)) -> None:
+def delete_type_ep(user: CurrentUserDep, type_id: str, db: Session = Depends(get_db)) -> None:
     """Удаление типа (FR-050) — СА; запрет при использовании."""
     from app.use_cases.types.delete_type import delete_type as uc
 
@@ -57,7 +57,7 @@ async def delete_type_ep(user: CurrentUserDep, type_id: str, db: Session = Depen
 
 
 @router.post("/types/{type_id}/attributes/{attribute_id}", status_code=204)
-async def bind_attribute_ep(
+def bind_attribute_ep(
     user: CurrentUserDep, type_id: str, attribute_id: str, db: Session = Depends(get_db)
 ) -> None:
     """Привязка атрибута (FR-044; лимит 50) — СА."""
@@ -65,7 +65,7 @@ async def bind_attribute_ep(
 
 
 @router.delete("/types/{type_id}/attributes/{attribute_id}", status_code=204)
-async def unbind_attribute_ep(
+def unbind_attribute_ep(
     user: CurrentUserDep, type_id: str, attribute_id: str, db: Session = Depends(get_db)
 ) -> None:
     """Исключение атрибута (FR-051: значения остаются) — СА."""

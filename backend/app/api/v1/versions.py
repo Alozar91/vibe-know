@@ -13,7 +13,7 @@ router = APIRouter(tags=["versions"])
 
 
 @router.get("/materials/{material_id}/versions")
-async def list_versions_ep(
+def list_versions_ep(
     user: CurrentUserDep, material_id: str, db: Session = Depends(get_db)
 ) -> dict:
     """Список версий (US-041 шаг 1, FR-145): даты/авторы; видимость = видимость
@@ -40,7 +40,7 @@ async def list_versions_ep(
 
 
 @router.get("/materials/{material_id}/versions/{number}")
-async def get_version_ep(
+def get_version_ep(
     user: CurrentUserDep, material_id: str, number: int, db: Session = Depends(get_db)
 ) -> dict:
     """Версия целиком (US-041 шаг 4): прежние файл/текст/название/тип/атрибуты/теги."""
@@ -59,7 +59,7 @@ async def get_version_ep(
 
 
 @router.get("/materials/{material_id}/versions/{number}/diff")
-async def diff_version_ep(
+def diff_version_ep(
     user: CurrentUserDep, material_id: str, number: int, db: Session = Depends(get_db)
 ) -> dict:
     """Diff соседних версий (§5.2, FR-146, 16.1-83): сравнение версии n с n−1.
@@ -135,7 +135,7 @@ class RestoreIn(BaseModel):
 
 
 @router.post("/materials/{material_id}/versions/{number}/restore", status_code=200)
-async def restore_version_ep(
+def restore_version_ep(
     user: CurrentUserDep, material_id: str, number: int,
     if_match: str | None = Header(default=None, alias="If-Match"),
     db: Session = Depends(get_db),

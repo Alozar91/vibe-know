@@ -27,13 +27,13 @@ class RolePatch(BaseModel):
 
 
 @router.get("/roles")
-async def list_roles_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> list[dict]:
+def list_roles_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> list[dict]:
     """Шаблоны ролей (FR-008)."""
     return list_roles(db)
 
 
 @router.post("/roles", status_code=201)
-async def create_role_ep(user: CurrentUserDep, body: RoleIn, db: Session = Depends(get_db)) -> dict:
+def create_role_ep(user: CurrentUserDep, body: RoleIn, db: Session = Depends(get_db)) -> dict:
     """Создание шаблона (FR-008, US-043) — СА."""
     from app.use_cases.roles.create_role import create_role as uc
 
@@ -41,7 +41,7 @@ async def create_role_ep(user: CurrentUserDep, body: RoleIn, db: Session = Depen
 
 
 @router.patch("/roles/{role_id}")
-async def update_role_ep(
+def update_role_ep(
     user: CurrentUserDep, role_id: str, body: RolePatch, db: Session = Depends(get_db)
 ) -> dict:
     """Правка шаблона (FR-008, US-043 шаг 2) — СА; снапшоты не затрагивает (FR-100)."""
@@ -51,7 +51,7 @@ async def update_role_ep(
 
 
 @router.delete("/roles/{role_id}", status_code=204)
-async def delete_role_ep(user: CurrentUserDep, role_id: str, db: Session = Depends(get_db)) -> None:
+def delete_role_ep(user: CurrentUserDep, role_id: str, db: Session = Depends(get_db)) -> None:
     """Удаление шаблона (FR-008) — СА."""
     from app.use_cases.roles.delete_role import delete_role as uc
 
@@ -59,7 +59,7 @@ async def delete_role_ep(user: CurrentUserDep, role_id: str, db: Session = Depen
 
 
 @router.post("/roles/{role_id}/clone", status_code=201)
-async def clone_role_ep(user: CurrentUserDep, role_id: str, db: Session = Depends(get_db)) -> dict:
+def clone_role_ep(user: CurrentUserDep, role_id: str, db: Session = Depends(get_db)) -> dict:
     """Клонирование: копия набора прав (FR-105, US-003 шаг 2) — СА."""
     from app.use_cases.roles.clone_role import clone_role as uc
 

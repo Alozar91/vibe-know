@@ -19,5 +19,8 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
 
-# Миграции применяются при старте api (HLD §8.1); затем uvicorn
-CMD ["sh", "-c", "alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# Миграции применяются при старте api (HLD §8.1); затем uvicorn.
+# 4 воркера — HLD §10 («Uvicorn-воркеры + пул соединений PG», вертикальный запас
+# single-node под NFR-008); LLD §3.3: кэш прав NOTIFY/LISTEN покрывает несколько
+# воркеров (свой LISTEN-поток на выделенном соединении в каждом, TTL 60 с — страховка).
+CMD ["sh", "-c", "alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4"]

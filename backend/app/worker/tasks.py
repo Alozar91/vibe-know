@@ -781,8 +781,14 @@ def keycloak_sync(self) -> dict:
 
     settings = get_settings()
     issuer = settings.oidc_issuer.rstrip("/")
-    # http://localhost:8080/realms/kb → http://keycloak:8080/... (внутренняя сеть)
-    kc_base = issuer.split("/realms/")[0].replace("localhost", "keycloak")
+    # http://localhost:8080/realms/kb → http://keycloak:8080/... (внутренняя сеть);
+    # при TLS-развёртывании (шаг [6]) issuer https://localhost/auth/realms/kb
+    kc_base = issuer.split("/realms/")[0]
+    for src, dst in (("https://localhost/auth", "http://keycloak:8080"),
+                     ("http://localhost:8080", "http://keycloak:8080")):
+        if kc_base == src:
+            kc_base = dst
+            break
     realm = issuer.split("/realms/")[-1]
 
     # Токен администратора: сервисный аккаунт kb-api (client credentials).

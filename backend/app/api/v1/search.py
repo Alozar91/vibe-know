@@ -15,7 +15,7 @@ router = APIRouter(tags=["search"])
 
 
 @router.get("/search")
-async def search_ep(
+def search_ep(
     user: CurrentUserDep,
     db: Session = Depends(get_db),
     q: str | None = None,
@@ -83,7 +83,7 @@ class SearchOpenIn(BaseModel):
 
 
 @router.post("/search-opens")
-async def search_opens_ep(
+def search_opens_ep(
     body: SearchOpenIn,
     user: CurrentUserDep,
     db: Session = Depends(get_db),
@@ -94,7 +94,7 @@ async def search_opens_ep(
 
 
 @router.get("/analytics/search")
-async def analytics_search_ep(
+def analytics_search_ep(
     user: CurrentUserDep,
     db: Session = Depends(get_db),
     limit: int = Query(default=20, ge=1, le=100),

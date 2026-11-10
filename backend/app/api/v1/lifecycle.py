@@ -38,7 +38,7 @@ def _json(obj) -> Response:
 
 
 @router.post("/materials/{material_id}/transitions")
-async def transition_ep(
+def transition_ep(
     user: CurrentUserDep, material_id: str, body: TransitionIn,
     if_match: str | None = Header(default=None, alias="If-Match"),
     db: Session = Depends(get_db),
@@ -55,7 +55,7 @@ async def transition_ep(
 
 
 @router.get("/materials/{material_id}/transitions")
-async def available_transitions_ep(
+def available_transitions_ep(
     user: CurrentUserDep, material_id: str, db: Session = Depends(get_db),
 ):
     """Доступные переходы из текущего статуса (FR-070): правило, права, доступность."""
@@ -67,7 +67,7 @@ async def available_transitions_ep(
 
 
 @router.get("/materials/{material_id}/status-log")
-async def status_log_ep(
+def status_log_ep(
     user: CurrentUserDep, material_id: str, db: Session = Depends(get_db),
 ):
     """Журнал статусов (FR-075); видимость материала обязательна (§12.3)."""
@@ -77,7 +77,7 @@ async def status_log_ep(
 
 
 @rules_router.get("/transition-rules")
-async def list_rules_ep(user: CurrentUserDep, db: Session = Depends(get_db)):
+def list_rules_ep(user: CurrentUserDep, db: Session = Depends(get_db)):
     """Матрица переходов (FR-070) — СА; is_protected только для чтения."""
     from app.use_cases.lifecycle.rules_crud import list_rules
 
@@ -85,7 +85,7 @@ async def list_rules_ep(user: CurrentUserDep, db: Session = Depends(get_db)):
 
 
 @rules_router.post("/transition-rules")
-async def create_rule_ep(user: CurrentUserDep, body: TransitionRuleIn, db: Session = Depends(get_db)):
+def create_rule_ep(user: CurrentUserDep, body: TransitionRuleIn, db: Session = Depends(get_db)):
     """Новое правило (US-046): from_status='archived' → 400 ARCHIVED_SOURCE_RULE_FORBIDDEN."""
     from app.use_cases.lifecycle.rules_crud import create_rule
 
@@ -93,7 +93,7 @@ async def create_rule_ep(user: CurrentUserDep, body: TransitionRuleIn, db: Sessi
 
 
 @rules_router.patch("/transition-rules/{rule_id}")
-async def patch_rule_ep(
+def patch_rule_ep(
     user: CurrentUserDep, rule_id: str, body: TransitionRulePatch, db: Session = Depends(get_db),
 ):
     """Смена прав перехода (US-046 шаг 2): достаточно любого из списка (FR-070)."""
@@ -103,7 +103,7 @@ async def patch_rule_ep(
 
 
 @rules_router.delete("/transition-rules/{rule_id}")
-async def delete_rule_ep(user: CurrentUserDep, rule_id: str, db: Session = Depends(get_db)):
+def delete_rule_ep(user: CurrentUserDep, rule_id: str, db: Session = Depends(get_db)):
     """Удаление незащищённого правила (FR-073/074): 204."""
     from app.use_cases.lifecycle.rules_crud import delete_rule
 

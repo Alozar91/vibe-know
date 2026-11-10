@@ -22,7 +22,7 @@ class TagMergeIn(BaseModel):
 
 
 @router.get("/tags")
-async def list_tags_ep(
+def list_tags_ep(
     user: CurrentUserDep, q: str | None = None, db: Session = Depends(get_db)
 ) -> list[dict]:
     """Словарь тегов (FR-052); q — автодополнение (US-031 шаг 4)."""
@@ -30,7 +30,7 @@ async def list_tags_ep(
 
 
 @router.post("/tags", status_code=201)
-async def create_tag_ep(user: CurrentUserDep, body: TagIn, db: Session = Depends(get_db)) -> dict:
+def create_tag_ep(user: CurrentUserDep, body: TagIn, db: Session = Depends(get_db)) -> dict:
     """Создание тега (US-033 шаг 2) — СА."""
     from app.use_cases.tags.create_tag import create_tag as uc
 
@@ -38,7 +38,7 @@ async def create_tag_ep(user: CurrentUserDep, body: TagIn, db: Session = Depends
 
 
 @router.post("/tags/{tag_id}:merge")
-async def merge_tag_ep(
+def merge_tag_ep(
     user: CurrentUserDep, tag_id: str, body: TagMergeIn, db: Session = Depends(get_db)
 ) -> dict:
     """Слияние тегов (FR-053, US-033 шаг 3) — СА."""
@@ -48,7 +48,7 @@ async def merge_tag_ep(
 
 
 @router.delete("/tags/{tag_id}", status_code=204)
-async def delete_tag_ep(user: CurrentUserDep, tag_id: str, db: Session = Depends(get_db)) -> None:
+def delete_tag_ep(user: CurrentUserDep, tag_id: str, db: Session = Depends(get_db)) -> None:
     """Удаление тега (FR-054: запрет при использовании) — СА."""
     from app.use_cases.tags.delete_tag import delete_tag as uc
 

@@ -12,10 +12,19 @@ _session_factory = None
 
 
 def get_engine():
-    """Ленивый движок (создаётся при первом обращении; pool_pre_ping — устойчивость к рестартам PG)."""
+    """Ленивый движок (создаётся при первом обращении; pool_pre_ping — устойчивость к рестартам PG).
+
+    Пул: 25 + 15 = 40 на воркер (этап 11, NFR-008) — sync-эндпоинты исполняются в
+    threadpool FastAPI (лимит anyio 40 потоков/воркер); пул = потолку потоков,
+    иначе очередь пула давала таймауты 500 под пиками. 4 воркера × 40 = 160 макс
+    + worker ~15 + LISTEN 4 + JDBC Keycloak + экспортеры ≈ 190 < 250 (compose).
+    """
     global _engine
     if _engine is None:
-        _engine = create_engine(get_settings().database_url, pool_pre_ping=True)
+        _engine = create_engine(
+            get_settings().database_url, pool_pre_ping=True,
+            pool_size=25, max_overflow=15, pool_timeout=30,
+        )
     return _engine
 
 

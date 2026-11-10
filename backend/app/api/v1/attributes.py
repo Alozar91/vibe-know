@@ -29,13 +29,13 @@ class AttributePatch(BaseModel):
 
 
 @router.get("/attributes")
-async def list_attributes_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> list[dict]:
+def list_attributes_ep(user: CurrentUserDep, db: Session = Depends(get_db)) -> list[dict]:
     """Глобальный пул атрибутов (FR-044)."""
     return list_attributes(db)
 
 
 @router.post("/attributes", status_code=201)
-async def create_attribute_ep(user: CurrentUserDep, body: AttributeIn, db: Session = Depends(get_db)) -> dict:
+def create_attribute_ep(user: CurrentUserDep, body: AttributeIn, db: Session = Depends(get_db)) -> dict:
     """Создание атрибута (FR-044, US-030 шаг 1) — СА."""
     from app.use_cases.attributes.create_attribute import create_attribute as uc
 
@@ -47,7 +47,7 @@ async def create_attribute_ep(user: CurrentUserDep, body: AttributeIn, db: Sessi
 
 
 @router.patch("/attributes/{attribute_id}")
-async def update_attribute_ep(
+def update_attribute_ep(
     user: CurrentUserDep, attribute_id: str, body: AttributePatch, db: Session = Depends(get_db)
 ) -> dict:
     """Правка (FR-045: value_type/is_multivalue неизменяемы) — СА."""
@@ -61,7 +61,7 @@ async def update_attribute_ep(
 
 
 @router.delete("/attributes/{attribute_id}", status_code=204)
-async def delete_attribute_ep(user: CurrentUserDep, attribute_id: str, db: Session = Depends(get_db)) -> None:
+def delete_attribute_ep(user: CurrentUserDep, attribute_id: str, db: Session = Depends(get_db)) -> None:
     """Удаление (FR-050: запрет при использовании) — СА."""
     from app.use_cases.attributes.delete_attribute import delete_attribute as uc
 

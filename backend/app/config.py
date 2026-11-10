@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     rag_embedding_timeout: float = 30.0
     rag_embedding_batch: int = 32  # чанков в одном запросе (§6: 32–64)
 
+    # MCP-сервер (пост-MVP шаг [7] ч.5, RAG_DESIGN §8-5): read-only тулы
+    # kb_search/kb_groups на /api/v1/mcp. По умолчанию включён; 0/false — off.
+    mcp_enabled: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -215,6 +215,9 @@ services:
       # Тестовая регистрация с выбором роли (НЕ для продуктива): задаётся только
       # на тестовом стенде; пусто/false — функция выключена
       KB_TEST_REGISTRATION: ${KB_TEST_REGISTRATION:-false}
+      # MCP-сервер (RAG_DESIGN §8-5): read-only тулы kb_search/kb_groups на
+      # /api/v1/mcp; аутентификация — Bearer Keycloak. По умолчанию включён.
+      KB_MCP_ENABLED: ${KB_MCP_ENABLED:-true}
       KB_LOG_LEVEL: ${LOG_LEVEL}
     ports:
       # 8000 на хосте занят сторонним процессом — хост-маппинг 8001 (внутри сети — 8000)

@@ -8,6 +8,7 @@ from app.config import get_settings
 from app.logging import configure_logging, get_logger
 from app.api.health import router as health_router
 from app.api.v1.router import api_router
+from contextlib import AsyncExitStack, asynccontextmanager
 
 log = get_logger(__name__)
 
@@ -42,6 +43,15 @@ def create_app() -> FastAPI:
     # REST API /api/v1 (FR-130)
     app.include_router(api_router, prefix="/api/v1")
 
+    # MCP-сервер (пост-MVP шаг [7] ч.5, RAG_DESIGN §8-5, CONCEPT 10.4):
+    # read-only тулы kb_search/kb_groups поверх /rag/retrieve; аутентификация
+    # та же (Bearer + introspection). Отключается пустым KB_MCP_ENABLED.
+    if settings.mcp_enabled:
+        from app.api.mcp_server import mcp_asgi_app, mcp_lifespan
+
+        app.mount("/api/v1/mcp", mcp_asgi_app())
+        _wrap_lifespan_with_mcp(app, mcp_lifespan)
+
     # healthz/readyz — вне версионированного префикса (для healthcheck Compose)
     app.include_router(health_router)
 
@@ -59,6 +69,26 @@ async def _lifespan(app: FastAPI):
     log.info("api.started")
     yield
     log.info("api.stopped")
+
+
+def _wrap_lifespan_with_mcp(app: FastAPI, mcp_lifespan) -> None:
+    """Хост владеет lifespan MCP-сессии (Mount гасит собственный — docs SDK).
+
+    Сессия MCP стартует после LISTEN-потока кэша прав; её сбой валит запуск
+    (честный отказ вместо тишины).
+    """
+    from contextlib import asynccontextmanager as _alcm
+
+    original = app.router.lifespan_context
+
+    @_alcm
+    async def combined(app_: FastAPI):
+        async with AsyncExitStack() as stack:
+            await stack.enter_async_context(original(app_))
+            await stack.enter_async_context(mcp_lifespan(app_))
+            yield
+
+    app.router.lifespan_context = combined
 
 
 def register_exception_handlers(app: FastAPI) -> None:

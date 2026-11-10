@@ -142,11 +142,31 @@
       ]
     },
     {
-      "username": "sidorova",
+      "username": "sidorov",
       "enabled": true,
-      "email": "sidorova@example.local",
-      "firstName": "Анна",
-      "lastName": "Сидорова",
+      "email": "sidorov@example.local",
+      "firstName": "Андрей",
+      "lastName": "Сидоров",
+      "credentials": [
+        { "type": "password", "value": "${KB_TEST_PASSWORD}", "temporary": false }
+      ]
+    },
+    {
+      "username": "smirnova",
+      "enabled": true,
+      "email": "smirnova@example.local",
+      "firstName": "Ольга",
+      "lastName": "Смирнова",
+      "credentials": [
+        { "type": "password", "value": "${KB_TEST_PASSWORD}", "temporary": false }
+      ]
+    },
+    {
+      "username": "kuznetsov",
+      "enabled": true,
+      "email": "kuznetsov@example.local",
+      "firstName": "Дмитрий",
+      "lastName": "Кузнецов",
       "credentials": [
         { "type": "password", "value": "${KB_TEST_PASSWORD}", "temporary": false }
       ]

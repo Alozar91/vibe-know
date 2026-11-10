@@ -200,3 +200,29 @@ docker compose run --rm --entrypoint bash backup -c "\
   `docker compose up -d` (миграции применяются при старте api автоматически).
 - **Чистый перезапуск с потерей данных**: `docker compose down -v` (внимание:
   удаляет тома, включая `backups` — выгрузить копии заранее).
+
+## 7. Демонстрационные данные стенда (тестовый realm)
+
+Полный сброс контента и пересев демо-набора (пользователи, группы с иерархией,
+материалы во всех статусах, мастер-подчинённая цепочка):
+
+```bash
+cd deploy
+# 1. Очистить silo (CAS-объекты) и БД (контентные таблицы; роли/настройки/переходы сохраняются)
+docker compose run --rm --entrypoint /bin/sh -v "${PWD}/silo-clean.sh:/clean.sh:ro" silo-init /clean.sh
+Get-Content cleanup.sql -Raw | docker compose exec -T postgres psql -U kb -d kb
+# 1а. После TRUNCATE СА теряет is_super (user_roles пуст) — вернуть напрямую:
+docker compose exec -T postgres psql -U kb -d kb -c "INSERT INTO user_roles (user_id, role_id) SELECT u.id, r.id FROM users u, roles r WHERE u.display_name = 'Иван Иванов' AND r.name = 'Системный администратор';"
+# 2. Пересеять демо-данные (идемпотентно: сеет недостающее, существующее не трогает)
+python seed_demo.py            # --check — только отчёт о состоянии
+```
+
+Состав демо-набора: 6 пользователей Keycloak (`deploy/keycloak/realm-kb-test.json`;
+после cleanup.sql создаются через kcadm самим `seed_demo.py`) — ivanov и merch
+(СА), petrov (Рецензент), sidorov (Автор), smirnova (Читатель), kuznetsov
+(без роли — проверка оффера выбора роли). Группы: «Корпоративные регламенты»
+(ИТ, Информационная безопасность), «Управление персоналом» (Онбординг,
+Администрирование) — со снапшотами прав по ролям. 9 материалов: мастер
+«Регламент резервного копирования» (публикация) + 2 подчинённых (адаптация в
+Онбординге, перевод ENG в ИТ), остальные — публикации/утверждён/на проверке/
+черновик. Пароль всех пользователей — `KB_TEST_PASSWORD` (тестовый realm).

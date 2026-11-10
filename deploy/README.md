@@ -48,13 +48,15 @@ cp deploy/.env.example deploy/.env
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Основная БД (`kb`); БД `keycloak` создаётся init-скриптом |
 | `KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD` | Начальный администратор Keycloak (консоль `/realms/master/console`), не СА системы |
 | `KB_API_CLIENT_SECRET` / `KB_CLI_CLIENT_SECRET` | Секреты клиентов `kb-api` / `kb-cli` realm `kb` (подставляются в realm-импорт) |
-| `KB_TEST_PASSWORD` | Пароль сид-пользователей realm (ivanov/petrov/sidorova) — **только тестовый realm** |
+| `KB_TEST_PASSWORD` | Пароль сид-пользователей realm (список — §7) — **только тестовый realm** |
 | `SILO_ROOT_USER` / `SILO_ROOT_PASSWORD` / `SILO_BUCKET` | CAS-хранилище |
 | `BACKUP_RESTIC_PASSWORD` | Пароль шифрования restic-репозитория; смена = старые снапшоты нечитаемы |
 | `BACKUP_INTERVAL_SECONDS` | Интервал цикла копирования (86400 = сутки) |
 | `LOG_LEVEL`, `LOG_MAX_SIZE`, `LOG_MAX_FILE` | Логи приложений и ротация логов контейнеров (HLD §8.3) |
 | `KB_PUBLIC_URL` | Публичный адрес стенда (`http://IP` или `https://домен`): redirectUris realm, CORS api, адрес Keycloak в SPA (build-arg nginx). Пусто — локальный стенд. Смена после первого импорта realm — только `down -v` или правка в консоли Keycloak |
 | `KC_HOSTNAME_URL` | Адрес Keycloak (issuer): для `KB_PUBLIC_URL=https://домен` — `https://домен/auth` (TLS за nginx, порт 8080 закрыт); для `http://IP` — `http://IP:8080` |
+| `VITE_APP_BASE` | База приложения (подпуть): `/know` → приложение на `http://IP/know/` (nginx отдаёт SPA из подпути, redirect_uri матчится `${KB_PUBLIC_URL}/*`). Пусто — корень. Смена → `docker compose build nginx` |
+| `KB_PKCE_METHOD` | PKCE-метод клиента `kb-spa` в realm (дефолт `S256`). На http-стендах SPA не имеет `crypto.subtle` (нет secure context) и шлёт `plain` — задать `KB_PKCE_METHOD=plain`; после включения TLS вернуть `S256`. Смена → `down -v` (переимпорт realm) |
 
 ### 2.3. Запуск
 
@@ -68,8 +70,8 @@ docker compose ps             # все сервисы healthy/exit 0
 1. `postgres`: init-скрипт создаёт БД `keycloak`; `pgbackrest.sh` (фоновый цикл
    в контейнере postgres) создаёт stanza `kb` и ведёт базовые копии;
 2. `keycloak`: импорт realm `kb` из `keycloak/realm-kb-test.json` (тестовый realm
-   с сид-пользователями). **Для внедрения** — импорт рабочего realm без
-   тестовых УЗ: подготовить отдельный JSON (без ivanov/petrov/sidorova,
+   с сид-пользователями, состав — §7). **Для внедрения** — импорт рабочего realm
+   без тестовых УЗ: подготовить отдельный JSON (без сид-пользователей,
    свои секреты клиентов) и смонтировать его вместо `realm-kb-test.json`;
    realm не переимпортируется, если уже существует в БД (изменение паролей —
    `down -v` или kcadm `set-password`);
@@ -79,7 +81,8 @@ docker compose ps             # все сервисы healthy/exit 0
    textfile `/backups/prometheus/backup_state.prom` (скрейпится node-exporter).
 
 Проверка: `http://localhost/healthz` (через nginx) → `{"status":"ok"}`;
-UI — `http://localhost/`; API-документация — `http://localhost:8001/api/v1/docs`
+UI — `http://localhost/` (или `http://localhost/know/` при `VITE_APP_BASE=/know`);
+API-документация — `http://localhost:8001/api/v1/docs`
 (NFR-021). Первый СА системы заводится через Keycloak-консоль и назначается
 группой СА в realm (13.2) — либо используются учётные записи realm-импорта.
 
@@ -183,7 +186,11 @@ docker compose run --rm --entrypoint bash backup -c "\
    ```ini
    KB_PUBLIC_URL=https://merch-vibe.ru
    KC_HOSTNAME_URL=https://merch-vibe.ru/auth
+   KB_PKCE_METHOD=S256
    ```
+   (`KB_PKCE_METHOD` — если стенд жил на http с `plain`: HTTPS вернёт secure
+   context, SPA снова шлёт S256 — политика realm должна совпасть; переимпорт
+   realm — `down -v` перед `up`.)
 3. Сертификат. Рабочий вариант — Let's Encrypt; nginx принимает и самоподписанный
    (в `certs/` уже лежит placeholder, генерируемый `tls-fallback.sh` при старте).
    Первый выпуск (webroot через работающий nginx — nginx уже должен быть запущен):
@@ -211,6 +218,11 @@ docker compose run --rm --entrypoint bash backup -c "\
 работает сразу. Затем webroot-выпуск п. 3, deploy-hook копирует сертификаты в
 `certs/` и перезагружает nginx — TLS сразу с боевым сертификатом. Контейнеру
 доступен каталог ACME (`deploy/nginx/acme` → `/var/www/certbot` в nginx).
+
+После перехода на TLS закрыть порт 8080 в панели провайдера (Keycloak —
+только за nginx по `/auth`); фаервол панели, не ufw — Docker его обходит.
+Из http-стенда (PKCE plain) переход = `down -v` + пересев `seed_demo.py`
+(realm импортируется один раз).
 
 ## 6. Обслуживание
 
@@ -240,12 +252,14 @@ docker compose exec -T postgres psql -U kb -d kb -c "INSERT INTO user_roles (use
 python seed_demo.py            # --check — только отчёт о состоянии
 ```
 
-Состав демо-набора: 6 пользователей Keycloak (`deploy/keycloak/realm-kb-test.json`;
-после cleanup.sql создаются через kcadm самим `seed_demo.py`) — ivanov и merch
-(СА), petrov (Рецензент), sidorov (Автор), smirnova (Читатель), kuznetsov
-(без роли — проверка оффера выбора роли). Группы: «Корпоративные регламенты»
+Состав демо-набора: 6 пользователей — 5 в realm JSON (ivanov — СА,
+petrov (Рецензент), sidorov (Автор), smirnova (Читатель), kuznetsov
+(без роли — проверка оффера выбора роли)) + merch (СА; в realm JSON нет —
+создаётся через kcadm при сиде `seed_demo.py`, ASCII-логин для kcadm).
+Группы: «Корпоративные регламенты»
 (ИТ, Информационная безопасность), «Управление персоналом» (Онбординг,
 Администрирование) — со снапшотами прав по ролям. 9 материалов: мастер
 «Регламент резервного копирования» (публикация) + 2 подчинённых (адаптация в
 Онбординге, перевод ENG в ИТ), остальные — публикации/утверждён/на проверке/
 черновик. Пароль всех пользователей — `KB_TEST_PASSWORD` (тестовый realm).
+Вход в SPA — по подпути (§2.2 `VITE_APP_BASE`), например `http://IP/know/`.

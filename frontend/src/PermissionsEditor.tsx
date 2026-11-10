@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from './auth'
 import type { Role, Snapshot } from './types'
+import { Empty, Err } from './ui'
 
 const PERMISSIONS_RU: Record<string, string> = {
   view: 'Просмотр', create: 'Создание', edit: 'Редактирование', delete: 'Удаление',
@@ -73,36 +74,43 @@ export default function PermissionsEditor({ objectType, objectId }: Props) {
   const assignable = roles.filter((r) => !r.is_virtual_all_users)
 
   return (
-    <div style={{ borderTop: '1px solid #ddd', marginTop: 24, paddingTop: 12 }}>
+    <div className="permbox">
       <h3>Права доступа (снапшоты)</h3>
-      {error && <p style={{ color: '#b00' }}>{error}</p>}
+      <Err>{error}</Err>
 
       {assignable.length > 0 && (
-        <p>
-          Скопировать права из шаблона:{' '}
+        <div className="btnrow">
+          <span className="note">Скопировать права из шаблона:</span>
           {assignable.map((r) => (
-            <button key={r.id} onClick={() => copyFromRole(r.id)} style={{ marginRight: 6 }}>
+            <button key={r.id} className="btn small ghost" onClick={() => copyFromRole(r.id)}>
               {r.name}
             </button>
           ))}
-        </p>
+        </div>
       )}
 
-      {snapshots.length === 0 && <p style={{ color: '#777' }}>Снапшотов нет — доступ запрещён (default deny)</p>}
+      {snapshots.length === 0 && <Empty>Снапшотов нет — доступ запрещён (default deny)</Empty>}
       {snapshots.map((s) => (
-        <div key={s.id} style={{ border: '1px solid #eee', borderRadius: 6, padding: 10, marginBottom: 10 }}>
-          <b>{s.role_name}</b>{' '}
-          <button onClick={() => removeSnapshot(s.id)} style={{ float: 'right', color: '#b00' }}>Удалить</button>
-          <table style={{ borderCollapse: 'collapse', marginTop: 8 }}>
+        <div key={s.id} className="panel" style={{ marginBottom: 10 }}>
+          <div className="toolbar">
+            <strong style={{ fontSize: 13 }}>{s.role_name}</strong>
+            <span className="spacer" />
+            <button className="btn danger small" onClick={() => removeSnapshot(s.id)}>Удалить</button>
+          </div>
+          <table className="tbl">
             <tbody>
               {s.entries.map((e) => (
                 <tr key={e.permission}>
-                  <td style={{ padding: '2px 12px 2px 0' }}>{PERMISSIONS_RU[e.permission] ?? e.permission}</td>
-                  <td style={{ padding: '2px 12px' }}>{e.state === 'allow' ? '✓ Разрешить' : '✗ Запретить'}</td>
-                  <td style={{ padding: 2 }}>
-                    {e.state !== 'allow' && <button onClick={() => setState(s.id, e.permission, 'allow')}>Разрешить</button>}
-                    {e.state !== 'deny' && <button onClick={() => setState(s.id, e.permission, 'deny')}>Запретить</button>}
-                    <button onClick={() => setState(s.id, e.permission, 'unset')}>Не задано</button>
+                  <td style={{ width: '30%' }}>{PERMISSIONS_RU[e.permission] ?? e.permission}</td>
+                  <td>
+                    {e.state === 'allow'
+                      ? <span className="badge b-published">Разрешить</span>
+                      : <span className="badge b-archived">Запретить</span>}
+                  </td>
+                  <td className="btnrow" style={{ margin: 0 }}>
+                    {e.state !== 'allow' && <button className="btn small" onClick={() => setState(s.id, e.permission, 'allow')}>Разрешить</button>}
+                    {e.state !== 'deny' && <button className="btn small" onClick={() => setState(s.id, e.permission, 'deny')}>Запретить</button>}
+                    <button className="btn small ghost" onClick={() => setState(s.id, e.permission, 'unset')}>Не задано</button>
                   </td>
                 </tr>
               ))}

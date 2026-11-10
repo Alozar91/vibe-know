@@ -85,31 +85,30 @@ export default function NotificationBell({ unread }: { unread: number }) {
 
   const openMaterial = (id: string | null) => {
     if (!id) return
-    // Переход к материалу — через событие hash (App перехватывает) — упрощённо:
-    // раскрываем ленту не закрываем; материал открывается из карточки поиска/разделов
     setOpen(false)
     window.dispatchEvent(new CustomEvent('kb:open-material', { detail: id }))
   }
 
   return (
-    <span style={{ position: 'relative', marginRight: 12 }}>
-      <button onClick={toggle} title="Уведомления">
-        🔔{unread > 0 && (
-          <strong style={{ marginLeft: 4, color: '#c00' }}>({unread})</strong>
-        )}
+    <span className="bellwrap">
+      <button className="iconbtn" onClick={toggle} title="Уведомления">
+        🔔
+        {unread > 0 && <span className="dot">{unread}</span>}
       </button>
       {open && (
-        <div style={panel}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div className="popover">
+          <div className="poprow">
             <strong>Уведомления{total ? ` (${total})` : ''}</strong>
-            <button onClick={markAll} disabled={!items.some((x) => !x.read_at)}>
+            <span className="spacer" />
+            <button className="btn small" onClick={markAll} disabled={!items.some((x) => !x.read_at)}>
               Отметить все
             </button>
+            <button className="btn small ghost" onClick={() => setOpen(false)} title="Закрыть">✕</button>
           </div>
-          {items.length === 0 && <p style={{ color: '#666' }}>Пока нет уведомлений</p>}
-          <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+          {items.length === 0 && <div className="empty">Пока нет уведомлений</div>}
+          <ul className="poplist">
             {items.map((n) => (
-              <li key={n.id} style={{ ...item, fontWeight: n.read_at ? 400 : 700 }}>
+              <li key={n.id} className={n.read_at ? '' : 'unread'}>
                 <div>
                   {EVENT_TITLES[n.event_type] ?? n.event_type}
                   {n.material_id && (
@@ -121,10 +120,10 @@ export default function NotificationBell({ unread }: { unread: number }) {
                     </>
                   )}
                 </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                  <small style={{ color: '#666' }}>{fmtDate(n.created_at)}</small>
+                <div className="poprow" style={{ justifyContent: 'flex-start', marginBottom: 0 }}>
+                  <small className="note">{fmtDate(n.created_at)}</small>
                   {!n.read_at && (
-                    <button style={miniBtn} onClick={() => markRead(n.id)}>Прочитано</button>
+                    <button className="btn small" onClick={() => markRead(n.id)}>Прочитано</button>
                   )}
                 </div>
               </li>
@@ -135,28 +134,3 @@ export default function NotificationBell({ unread }: { unread: number }) {
     </span>
   )
 }
-
-const panel: React.CSSProperties = {
-  position: 'absolute',
-  right: 0,
-  top: '110%',
-  width: 460,
-  maxHeight: 420,
-  overflowY: 'auto',
-  background: '#fff',
-  border: '1px solid #ccc',
-  borderRadius: 6,
-  padding: 12,
-  zIndex: 100,
-  boxShadow: '0 4px 12px rgba(0,0,0,.15)',
-}
-
-const item: React.CSSProperties = {
-  padding: '8px 4px',
-  borderTop: '1px solid #eee',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 2,
-}
-
-const miniBtn: React.CSSProperties = { fontSize: 12, padding: '2px 8px' }

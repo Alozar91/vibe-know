@@ -1,6 +1,7 @@
 // Корпоративная база знаний — веб-клиент (SPA).
 // Этап 4: вход (US-001), дерево групп + списки (US-005), разделы (US-006),
 // карточка материала (US-037/031), снапшоты прав (US-044, СА).
+// modern-ui: каркас шапка+сайдбар, темы light/dark (переключатель в шапке).
 import { useEffect, useState } from 'react'
 import { completeLogin, getAccessToken, isAuthenticated, login, logout, api } from './auth'
 import MaterialsBrowser from './MaterialsBrowser'
@@ -15,8 +16,28 @@ import NotificationTriggers from './NotificationTriggers'
 import AuditLog from './AuditLog'
 import SystemSettings from './SystemSettings'
 import ServiceDesk from './ServiceDesk'
+import { applyTheme, loadTheme, type Theme } from './theme'
+import './styles.css'
 
 type View = { kind: 'browser' } | { kind: 'sections' } | { kind: 'matrix' } | { kind: 'search'; q: string } | { kind: 'analytics' } | { kind: 'material'; id: string } | { kind: 'triggers' } | { kind: 'audit' } | { kind: 'settings' } | { kind: 'service' }
+
+const NAV = [
+  { kind: 'browser', label: 'Материалы', icon: '📦', superOnly: false },
+  { kind: 'sections', label: 'Разделы', icon: '🗂️', superOnly: false },
+  { kind: 'matrix', label: 'Матрица переходов', icon: '🔀', superOnly: true },
+  { kind: 'analytics', label: 'Аналитика поиска', icon: '📈', superOnly: true },
+  { kind: 'triggers', label: 'Настройка уведомлений', icon: '🔔', superOnly: true },
+  { kind: 'audit', label: 'Журнал аудита', icon: '🛡️', superOnly: true },
+  { kind: 'settings', label: 'Параметры системы', icon: '⚙️', superOnly: true },
+  { kind: 'service', label: 'Служебный раздел', icon: '🧰', superOnly: true },
+] as const
+
+// Инициалы для аватара: «Иван Иванов» → «ИИ»
+function initials(name?: string): string {
+  if (!name) return '?'
+  const parts = name.trim().split(/\s+/)
+  return parts.slice(0, 2).map((x) => x[0]?.toUpperCase() ?? '').join('')
+}
 
 export default function App() {
   const [ready, setReady] = useState(false)
@@ -25,7 +46,10 @@ export default function App() {
   const [refreshToken, setRefreshToken] = useState(0)
   const [me, setMe] = useState<{ display_name?: string; is_super?: boolean } | null>(null)
   const [searchQ, setSearchQ] = useState('')
+  const [theme, setTheme] = useState<Theme>(loadTheme)
   const unread = useUnreadCount()
+
+  useEffect(() => { applyTheme(theme) }, [theme])
 
   // Колокольчик: «открыть материал» из ленты уведомлений
   useEffect(() => {
@@ -51,115 +75,108 @@ export default function App() {
       .catch(() => setAuthed(false))
   }, [authed, refreshToken])
 
-  if (!ready) return <main style={wrap}><p>Загрузка…</p></main>
+  if (!ready) {
+    return (
+      <div className="login">
+        <div className="box"><p>Загрузка…</p></div>
+      </div>
+    )
+  }
 
   if (!authed || !getAccessToken()) {
     return (
-      <main style={wrap}>
-        <h1>Корпоративная база знаний</h1>
-        <p>Вход выполняется через Keycloak (Authorization Code + PKCE).</p>
-        <button onClick={() => login().catch(console.error)}>Войти</button>
-      </main>
+      <div className="login">
+        <div className="box">
+          <div className="logo mark" style={{ margin: '0 auto 14px' }}>БЗ</div>
+          <h2>Корпоративная база знаний</h2>
+          <p className="note">Вход выполняется через Keycloak (Authorization Code + PKCE).</p>
+          <button className="btn primary" onClick={() => login().catch(console.error)}>Войти</button>
+        </div>
+      </div>
     )
   }
 
   return (
-    <main style={{ ...wrap, maxWidth: 1100 }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <h1 style={{ fontSize: 22 }}>Корпоративная база знаний</h1>
-        <span>
-          <NotificationBell unread={unread} />
-          {me?.display_name ?? '…'}{' '}
-          {me?.is_super && <small style={{ background: '#333', color: '#fff', padding: '2px 6px', borderRadius: 4 }}>СА</small>}{' '}
-          <button onClick={() => logout()}>Выйти</button>
-        </span>
-      </header>
-      {/* Глобальный поиск в шапке — на всех страницах (FR-110, US-034) */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)}
-               placeholder="Поиск…" style={{ flex: 1 }}
-               onKeyDown={(e) => {
-                 if (e.key === 'Enter') setView({ kind: 'search', q: searchQ })
-               }} />
-        <button onClick={() => setView({ kind: 'search', q: searchQ })}>Найти</button>
-      </div>
-      <nav style={{ marginBottom: 16, display: 'flex', gap: 8 }}>
-        <button onClick={() => setView({ kind: 'browser' })}
-                style={view.kind === 'browser' ? activeNav : {}}>
-          Материалы
-        </button>
-        <button onClick={() => setView({ kind: 'sections' })}
-                style={view.kind === 'sections' ? activeNav : {}}>
-          Разделы
-        </button>
-        {me?.is_super && (
-          <button onClick={() => setView({ kind: 'matrix' })}
-                  style={view.kind === 'matrix' ? activeNav : {}}>
-            Матрица переходов
-          </button>
-        )}
-        {me?.is_super && (
-          <button onClick={() => setView({ kind: 'analytics' })}
-                  style={view.kind === 'analytics' ? activeNav : {}}>
-            Аналитика поиска
-          </button>
-        )}
-        {me?.is_super && (
-          <button onClick={() => setView({ kind: 'triggers' })}
-                  style={view.kind === 'triggers' ? activeNav : {}}>
-            Настройка уведомлений
-          </button>
-        )}
-        {me?.is_super && (
-          <button onClick={() => setView({ kind: 'audit' })}
-                  style={view.kind === 'audit' ? activeNav : {}}>
-            Журнал аудита
-          </button>
-        )}
-        {me?.is_super && (
-          <button onClick={() => setView({ kind: 'settings' })}
-                  style={view.kind === 'settings' ? activeNav : {}}>
-            Параметры системы
-          </button>
-        )}
-        {me?.is_super && (
-          <button onClick={() => setView({ kind: 'service' })}
-                  style={view.kind === 'service' ? activeNav : {}}>
-            Служебный раздел
-          </button>
-        )}
-      </nav>
-
-      {view.kind === 'browser' && (
-        <MaterialsBrowser onOpenMaterial={(id) => setView({ kind: 'material', id })} refreshToken={refreshToken} />
-      )}
-      {view.kind === 'sections' && (
-        <Sections onOpenMaterial={(id) => setView({ kind: 'material', id })} refreshToken={refreshToken} />
-      )}
-      {view.kind === 'matrix' && <TransitionMatrix />}
-      {view.kind === 'analytics' && <SearchAnalytics />}
-      {view.kind === 'triggers' && <NotificationTriggers />}
-      {view.kind === 'audit' && <AuditLog />}
-      {view.kind === 'settings' && <SystemSettings />}
-      {view.kind === 'service' && <ServiceDesk />}
-      {view.kind === 'search' && (
-        <SearchView initialQuery={view.q} onOpenMaterial={(id) => setView({ kind: 'material', id })} />
-      )}
-      {view.kind === 'material' && (
-        <>
-          <MaterialCardView
-            materialId={view.id}
-            onSaved={() => setRefreshToken((x) => x + 1)}
-            onClosed={() => setView({ kind: 'browser' })}
-            onOpenCard={(id) => setView({ kind: 'material', id })}
+    <>
+      <header className="topbar">
+        <div className="logo"><div className="mark">БЗ</div> Корпоративная база знаний</div>
+        {/* Глобальный поиск в шапке — на всех страницах (FR-110, US-034) */}
+        <div className="gsearch">
+          <span className="ico">🔍</span>
+          <input
+            value={searchQ}
+            onChange={(e) => setSearchQ(e.target.value)}
+            placeholder="Поиск по материалам… (Enter)"
+            onKeyDown={(e) => { if (e.key === 'Enter') setView({ kind: 'search', q: searchQ }) }}
           />
-          {/* US-044: управление правами — только СА (FR-105); компонент сам получит 403 у не-СА */}
-          <PermissionsEditor objectType="material" objectId={view.id} />
-        </>
-      )}
-    </main>
+        </div>
+        <div className="spacer" />
+        <button
+          className="iconbtn"
+          title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+        >
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
+        <NotificationBell unread={unread} />
+        <div className="who">
+          <div className="avatar">{initials(me?.display_name)}</div>
+          <div>
+            <div className="name">
+              {me?.display_name ?? '…'} {me?.is_super && <span className="sa-badge">СА</span>}
+            </div>
+            <div className="role">{me?.is_super ? 'Системный администратор' : 'Пользователь'}</div>
+          </div>
+        </div>
+        <button className="btn ghost small" onClick={() => logout()}>Выйти</button>
+      </header>
+
+      <div className="shell">
+        <aside className="side">
+          <h4>Разделы</h4>
+          <nav className="nav">
+            {NAV.filter((n) => !n.superOnly || me?.is_super).map((n) => (
+              <button
+                key={n.kind}
+                className={`navi ${view.kind === n.kind ? 'on' : ''}`}
+                onClick={() => setView({ kind: n.kind } as View)}
+              >
+                <span className="ni">{n.icon}</span> {n.label}
+              </button>
+            ))}
+          </nav>
+        </aside>
+
+        <main className="content">
+          {view.kind === 'browser' && (
+            <MaterialsBrowser onOpenMaterial={(id) => setView({ kind: 'material', id })} refreshToken={refreshToken} />
+          )}
+          {view.kind === 'sections' && (
+            <Sections onOpenMaterial={(id) => setView({ kind: 'material', id })} refreshToken={refreshToken} />
+          )}
+          {view.kind === 'matrix' && <TransitionMatrix />}
+          {view.kind === 'analytics' && <SearchAnalytics />}
+          {view.kind === 'triggers' && <NotificationTriggers />}
+          {view.kind === 'audit' && <AuditLog />}
+          {view.kind === 'settings' && <SystemSettings />}
+          {view.kind === 'service' && <ServiceDesk />}
+          {view.kind === 'search' && (
+            <SearchView initialQuery={view.q} onOpenMaterial={(id) => setView({ kind: 'material', id })} />
+          )}
+          {view.kind === 'material' && (
+            <>
+              <MaterialCardView
+                materialId={view.id}
+                onSaved={() => setRefreshToken((x) => x + 1)}
+                onClosed={() => setView({ kind: 'browser' })}
+                onOpenCard={(id) => setView({ kind: 'material', id })}
+              />
+              {/* US-044: управление правами — только СА (FR-105); компонент сам получит 403 у не-СА */}
+              <PermissionsEditor objectType="material" objectId={view.id} />
+            </>
+          )}
+        </main>
+      </div>
+    </>
   )
 }
-
-const wrap: React.CSSProperties = { fontFamily: 'system-ui, sans-serif', margin: '1.5rem auto', maxWidth: 900, padding: '0 1rem' }
-const activeNav: React.CSSProperties = { fontWeight: 'bold', borderBottom: '2px solid #333' }

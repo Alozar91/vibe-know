@@ -3,6 +3,7 @@
 // параметры Keycloak (пароли/сессии) — вне реестра, ссылка на консоль.
 import { useCallback, useEffect, useState } from 'react'
 import { api } from './auth'
+import { Err, Ok } from './ui'
 
 interface Setting {
   key: string
@@ -52,36 +53,35 @@ export default function SystemSettings() {
 
   return (
     <section>
-      <h2>Параметры системы</h2>
-      <p style={{ color: '#555' }}>
+      <div className="pagehead"><h2>Параметры системы</h2></div>
+      <p className="note">
         Изменение поведения — без правки кода (NFR-020). Политики Keycloak
         (пароли, сессии, блокировка) — в консоли Keycloak (US-048 ш.1).
       </p>
-      {error && <p style={{ color: '#c00' }}>{error}</p>}
-      {msg && <p style={{ color: '#060' }}>{msg}</p>}
-      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
-        <thead>
-          <tr>
-            <th style={th}>Ключ</th><th style={th}>Значение</th><th style={th}>Описание</th><th style={th}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((s) => (
-            <tr key={s.key}>
-              <td style={td}><code>{s.key}</code></td>
-              <td style={td}>
-                <input style={{ width: 220 }} value={drafts[s.key] ?? ''}
-                       onChange={(e) => setDrafts({ ...drafts, [s.key]: e.target.value })} />
-              </td>
-              <td style={td}>{s.description ?? '—'}</td>
-              <td style={td}><button onClick={() => save(s)}>Сохранить</button></td>
+      <Err>{error}</Err>
+      <Ok>{msg}</Ok>
+      <div className="panel">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Ключ</th><th>Значение</th><th>Описание</th><th></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((s) => (
+              <tr key={s.key}>
+                <td className="mono">{s.key}</td>
+                <td>
+                  <input style={{ width: 220 }} value={drafts[s.key] ?? ''}
+                         onChange={(e) => setDrafts({ ...drafts, [s.key]: e.target.value })} />
+                </td>
+                <td className="note">{s.description ?? '—'}</td>
+                <td><button className="btn small" onClick={() => save(s)}>Сохранить</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }
-
-const th: React.CSSProperties = { borderBottom: '2px solid #333', textAlign: 'left', padding: '4px 8px' }
-const td: React.CSSProperties = { borderBottom: '1px solid #ddd', padding: '4px 8px', verticalAlign: 'top' }

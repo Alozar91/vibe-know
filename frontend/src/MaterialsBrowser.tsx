@@ -1,12 +1,13 @@
-// Дерево групп + списки материалов (US-005): группы с view — с содержимым,
-// остальные — путь навигации (FR-103); сортировка/пагинация FR-117/121.
+// Перечень групп + список материалов (US-005): группы и view - это содержание,
+// остальное - параметры выборки (FR-103); сортировка/пагинация FR-117/121.
 import { useCallback, useEffect, useState } from 'react'
 import { api } from './auth'
-import { STATUS_RU, fmtDate, type GroupNode, type Material, type Page } from './types'
+import { fmtDate, type GroupNode, type Material, type Page } from './types'
+import { Empty, Err, Pager, StatusBadge } from './ui'
 
 interface Props {
   onOpenMaterial: (id: string) => void
-  refreshToken: number // рост → перезагрузка (после мутаций)
+  refreshToken: number // для перезагрузки (после действий)
 }
 
 export default function MaterialsBrowser({ onOpenMaterial, refreshToken }: Props) {
@@ -30,84 +31,72 @@ export default function MaterialsBrowser({ onOpenMaterial, refreshToken }: Props
     if (!selected) return
     setError('')
     api<Page<Material>>(`/materials?group_id=${selected.id}&page=${page}&per_page=${PER_PAGE}&sort=${sort}&order=${order}`)
-      .then((p) => {
-        setItems(p.items)
-        setTotal(p.total)
-      })
-      .catch((e) => {
-        setItems([])
-        setTotal(0)
-        setError(e.detail ?? String(e))
-      })
+      .then((p) => { setItems(p.items); setTotal(p.total) })
+      .catch((e) => setError(e.detail ?? String(e)))
   }, [selected, page, sort, order])
 
-  useEffect(() => {
-    loadList()
-  }, [loadList, refreshToken])
+  useEffect(() => { loadList() }, [loadList, refreshToken])
 
-  const changeSort = (field: string) => {
-    if (sort === field) {
-      setOrder(order === 'asc' ? 'desc' : 'asc')
-    } else {
-      setSort(field)
-      setOrder('desc')
-    }
+  function changeSort(col: string) {
+    if (sort === col) setOrder(order === 'asc' ? 'desc' : 'asc')
+    else { setSort(col); setOrder('asc') }
   }
 
   const pages = Math.max(1, Math.ceil(total / PER_PAGE))
 
   return (
-    <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
-      <aside style={{ minWidth: 260, borderRight: '1px solid #ddd', paddingRight: 16 }}>
-        <h3>Группы</h3>
-        <GroupTreeView nodes={tree} selected={selected} onSelect={(g) => { setSelected(g); setPage(1) }} />
-      </aside>
-      <section style={{ flex: 1 }}>
-        {error && <p style={{ color: '#b00' }}>{error}</p>}
-        {selected ? (
-          <>
-            <h2>{selected.name} <small style={{ color: '#777' }}>({total})</small></h2>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  <th style={th}>Название</th>
-                  <th style={th} onClick={() => changeSort('status')}>Статус</th>
-                  <th style={th} onClick={() => changeSort('updated_at')}>
-                    Изменён {sort === 'updated_at' ? (order === 'asc' ? '↑' : '↓') : ''}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((m) => (
-                  <tr key={m.id} onClick={() => onOpenMaterial(m.id)} style={{ cursor: 'pointer' }}>
-                    <td style={td}>{m.name}</td>
-                    <td style={td}>{STATUS_RU[m.status]}</td>
-                    <td style={td}>{fmtDate(m.updated_at)}</td>
+    <div>
+      <div className="pagehead">
+        <h2>{selected ? selected.name : 'Материалы'}</h2>
+        {selected && <span className="total-pill">{total}</span>}
+      </div>
+      <div className="browser">
+        <aside className="side-in-panel">
+          <h4>Группы</h4>
+          <GroupTreeView nodes={tree} selected={selected} onSelect={(g) => { setSelected(g); setPage(1) }} />
+        </aside>
+        <section className="browser-list">
+          <Err>{error}</Err>
+          {selected ? (
+            <div className="panel">
+              <div className="toolbar">
+                <span className="meta">Сортировка: {sort === 'updated_at' ? 'по изменению' : 'по статусу'} {order === 'asc' ? '↑' : '↓'}</span>
+                <span className="spacer" />
+                <span className="meta">Страница {page} из {pages}</span>
+              </div>
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Название</th>
+                    <th className="sortable" onClick={() => changeSort('status')}>Статус</th>
+                    <th className="sortable" onClick={() => changeSort('updated_at')}>
+                      Изменён {sort === 'updated_at' && <span className="arr">{order === 'asc' ? '↑' : '↓'}</span>}
+                    </th>
                   </tr>
-                ))}
-                {items.length === 0 && !error && (
-                  <tr><td style={td} colSpan={3}>Нет материалов</td></tr>
-                )}
-              </tbody>
-            </table>
-            {pages > 1 && (
-              <p>
-                Страница {page} из {pages}{' '}
-                <button disabled={page <= 1} onClick={() => setPage(page - 1)}>←</button>{' '}
-                <button disabled={page >= pages} onClick={() => setPage(page + 1)}>→</button>
-              </p>
-            )}
-          </>
-        ) : (
-          <p>Выберите группу в дереве слева (US-005).</p>
-        )}
-      </section>
+                </thead>
+                <tbody>
+                  {items.map((m) => (
+                    <tr key={m.id} className="rowlink" onClick={() => onOpenMaterial(m.id)}>
+                      <td className="mname">{m.name}</td>
+                      <td><StatusBadge status={m.status} /></td>
+                      <td className="nowrap">{fmtDate(m.updated_at)}</td>
+                    </tr>
+                  ))}
+                  {items.length === 0 && !error && (
+                    <tr><td colSpan={3}><Empty>В этой группе пока нет материалов</Empty></td></tr>
+                  )}
+                </tbody>
+              </table>
+              {pages > 1 && <Pager page={page} pages={pages} total={total} onPrev={() => setPage(page - 1)} onNext={() => setPage(page + 1)} />}
+            </div>
+          ) : (
+            <Empty>Выберите группу в дереве слева (US-005).</Empty>
+          )}
+        </section>
+      </div>
     </div>
   )
 }
-
-const th: React.CSSProperties = { textAlign: 'left', borderBottom: '2px solid #ccc', padding: 6, cursor: 'pointer' }
-const td: React.CSSProperties = { borderBottom: '1px solid #eee', padding: 6 }
 
 function GroupTreeView({ nodes, selected, onSelect, depth = 0 }: {
   nodes: GroupNode[]
@@ -116,17 +105,11 @@ function GroupTreeView({ nodes, selected, onSelect, depth = 0 }: {
   depth?: number
 }) {
   return (
-    <ul style={{ listStyle: 'none', paddingLeft: depth ? 16 : 0, margin: 0 }}>
+    <ul className="tree">
       {nodes.map((g) => (
         <li key={g.id}>
-          <div
-            onClick={() => onSelect(g)}
-            style={{
-              padding: '3px 6px', cursor: 'pointer', borderRadius: 4,
-              background: selected?.id === g.id ? '#dbe7ff' : 'transparent',
-            }}
-          >
-            📁 {g.name}
+          <div className={`g ${selected?.id === g.id ? 'on' : ''}`} onClick={() => onSelect(g)}>
+            <span className="fi">📁</span> {g.name}
           </div>
           {g.children && g.children.length > 0 && (
             <GroupTreeView nodes={g.children} selected={selected} onSelect={onSelect} depth={depth + 1} />

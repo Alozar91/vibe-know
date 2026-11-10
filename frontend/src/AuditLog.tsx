@@ -2,6 +2,7 @@
 // Таблица с фильтрами (action/object_type/даты) + выгрузка NDJSON (FR-143).
 import { useCallback, useEffect, useState } from 'react'
 import { api, getAccessToken } from './auth'
+import { Empty, Err, Pager } from './ui'
 
 interface AuditRow {
   id: number
@@ -63,56 +64,51 @@ export default function AuditLog() {
       .catch((e) => setError(String(e.message)))
   }
 
+  const pages = Math.max(1, Math.ceil(total / 50))
+
   return (
     <section>
-      <h2>Журнал аудита</h2>
-      <p style={{ color: '#555' }}>
+      <div className="pagehead"><h2>Журнал аудита</h2></div>
+      <p className="note">
         Записи неизменяемы (FR-141); просмотры материалов не фиксируются (FR-142).
       </p>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-        <input placeholder="action (напр. material.update)" value={action}
-               onChange={(e) => setAction(e.target.value)} />
-        <input placeholder="object_type" value={objectType}
-               onChange={(e) => setObjectType(e.target.value)} />
-        <button onClick={() => { setPage(1); load(1) }}>Фильтр</button>
-        <button onClick={exportNdjson}>Выгрузить NDJSON (FR-143)</button>
-      </div>
-      {error && <p style={{ color: '#c00' }}>{error}</p>}
-      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
-        <thead>
-          <tr>
-            <th style={th}>Когда</th><th style={th}>Кто</th><th style={th}>Действие</th>
-            <th style={th}>Объект</th><th style={th}>Детали</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id}>
-              <td style={td}>{fmt(r.occurred_at)}</td>
-              <td style={td}>
-                {r.actor_is_service
-                  ? 'система'
-                  : (r.actor_display_name || (r.actor_user_id ? r.actor_user_id.slice(0, 8) + '…' : '—'))}
-              </td>
-              <td style={td}>{r.action}</td>
-              <td style={td}>{r.object_type}{r.object_id ? ` (${r.object_id.slice(0, 8)}…)` : ''}</td>
-              <td style={{ ...td, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {JSON.stringify(r.details)}
-              </td>
+      <div className="panel">
+        <div className="toolbar">
+          <input placeholder="action (напр. material.update)" value={action}
+                 onChange={(e) => setAction(e.target.value)} />
+          <input placeholder="object_type" value={objectType}
+                 onChange={(e) => setObjectType(e.target.value)} />
+          <button className="btn" onClick={() => { setPage(1); load(1) }}>Фильтр</button>
+          <span className="spacer" />
+          <button className="btn ghost" onClick={exportNdjson}>Выгрузить NDJSON</button>
+        </div>
+        <Err>{error}</Err>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Когда</th><th>Кто</th><th>Действие</th>
+              <th>Объект</th><th>Детали</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <div style={{ marginTop: 8 }}>
-        Страница {page}, всего {total}
-        <button style={{ marginLeft: 8 }} disabled={page <= 1}
-                onClick={() => { setPage(page - 1); load(page - 1) }}>← Назад</button>
-        <button style={{ marginLeft: 4 }} disabled={(page * 50) >= total}
-                onClick={() => { setPage(page + 1); load(page + 1) }}>Вперёд →</button>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td className="nowrap">{fmt(r.occurred_at)}</td>
+                <td>
+                  {r.actor_is_service
+                    ? 'система'
+                    : (r.actor_display_name || (r.actor_user_id ? r.actor_user_id.slice(0, 8) + '…' : '—'))}
+                </td>
+                <td className="mono">{r.action}</td>
+                <td className="mono">{r.object_type}{r.object_id ? ` (${r.object_id.slice(0, 8)}…)` : ''}</td>
+                <td className="wrap-anywhere mono">{JSON.stringify(r.details)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && <tr><td colSpan={5}><Empty>Записей нет</Empty></td></tr>}
+          </tbody>
+        </table>
+        <Pager page={page} pages={pages} total={total} onPrev={() => { setPage(page - 1); load(page - 1) }} onNext={() => { setPage(page + 1); load(page + 1) }} />
       </div>
     </section>
   )
 }
-
-const th: React.CSSProperties = { borderBottom: '2px solid #333', textAlign: 'left', padding: '4px 8px' }
-const td: React.CSSProperties = { borderBottom: '1px solid #ddd', padding: '4px 8px', verticalAlign: 'top' }

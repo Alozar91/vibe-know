@@ -350,6 +350,12 @@ services:
   # (postgres-контейнер) и restic (контейнер backup) работают от postgres
   # (pgBackRest запрещает root).
   backup-init:
+    # Тот же образ, что и postgres (собирается из ./backup) — секция build
+    # обязательна: на свежем сервере compose иначе тянет образ из Docker Hub
+    # раньше, чем его соберёт postgres (pull access denied).
+    build:
+      context: ./backup
+      dockerfile: Dockerfile
     image: kb-pg-backup-tools:18.6
     container_name: kb-backup-init
     user: root

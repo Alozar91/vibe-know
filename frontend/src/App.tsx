@@ -87,12 +87,19 @@ function RolePicker({ onDone }: { onDone: (dismiss?: boolean) => void }) {
     return <div className="rolepick"><div className="box"><p className="spin">Загрузка…</p></div></div>
   }
   if (!offer.available) {
+    // Два разных случая: роль уже есть (флаг включён) или флаг выключен —
+    // иначе «Роль уже назначена» вводит в заблуждение на стенде без флага.
+    const enabled = offer.enabled
     return (
       <div className="rolepick">
         <div className="box">
           <div className="logo mark">БЗ</div>
-          <h2>Роль уже назначена</h2>
-          <p className="note">Выбор роли доступен один раз; смену роли выполняет системный администратор.</p>
+          <h2>{enabled ? 'Роль уже назначена' : 'Тестовая регистрация отключена'}</h2>
+          <p className="note">
+            {enabled
+              ? 'Выбор роли доступен один раз; смену роли выполняет системный администратор.'
+              : 'Выбор роли на этом стенде не включён (флаг KB_TEST_REGISTRATION в deploy/.env). Роль назначит системный администратор, либо включите флаг и перезапустите api.'}
+          </p>
           <button className="btn primary" onClick={() => onDone(true)}>Продолжить</button>
         </div>
       </div>

@@ -176,6 +176,10 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
+      args:
+        # Зеркало PyPI для сборки (файлы pythonhosted недоступны с сервера —
+        # таймауты CDN): пример https://pypi.tuna.tsinghua.edu.cn; пусто = PyPI
+        UV_PYPI_MIRROR: ${UV_PYPI_MIRROR:-}
     container_name: kb-api
     logging: *default-logging
     depends_on:
@@ -219,6 +223,8 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
+      args:
+        UV_PYPI_MIRROR: ${UV_PYPI_MIRROR:-}
     container_name: kb-worker
     command: ["python", "-m", "app.worker.main"]
     logging: *default-logging

@@ -8,7 +8,15 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.1 /uv /usr/local/bin/uv
 
 # Слой зависимостей: кэшируется до изменения uv.lock
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+# UV_PYPI_MIRROR (опционально): если files.pythonhosted.org недоступен с сервера
+# (таймауты CDN Fastly), задать зеркало с теми же путями к файлам, например
+# https://pypi.tuna.tsinghua.edu.cn — хэши пакетов в uv.lock остаются валидными.
+# uv sync --frozen качает по абсолютным URL из uv.lock и индекс не подменяет
+# (astral-sh/uv#19625), поэтому URL переписываются на этапе сборки.
+ARG UV_PYPI_MIRROR=""
+RUN if [ -n "$UV_PYPI_MIRROR" ]; then \
+      sed -i "s#https://files.pythonhosted.org/packages/#${UV_PYPI_MIRROR}/packages/#g" uv.lock; \
+    fi && uv sync --frozen --no-dev --no-install-project
 
 # Код приложения
 COPY alembic.ini ./

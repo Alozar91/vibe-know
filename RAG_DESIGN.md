@@ -268,3 +268,147 @@ LIMIT :k;
 3. Гибрид: RRF против взвешенной суммы нормированных ранков?
 4. Кворум чанков одного материала в выдаче (дедупликация top-k по материалу)?
 5. Лимиты `/rag/retrieve` (k ≤ 20, rate limit) и аудит его вызовов.
+
+---
+
+## Приложение А. Пример entry-point чанкера (к §4.3)
+
+Механизм: система не импортирует плагин напрямую — при старте она опрашивает
+`importlib.metadata.entry_points(group="kb.rag.chunkers")`: какие **установленные
+в окружении пакеты** объявили себя чанкерами. Объявление живёт в метаданных
+пакета (pyproject), конфигов и списков плагинов в системе нет.
+
+### А.1. Сторона системы — контракт и реестр
+
+```python
+# backend/app/rag/base.py — контракт (плагин систему НЕ импортирует: duck typing)
+from dataclasses import dataclass, field
+
+@dataclass
+class Chunk:
+    content: str
+    meta: dict = field(default_factory=dict)   # заголовки, смещения, язык…
+
+class Chunker(Protocol):
+    name: str
+    def chunk(self, text: str, params: dict) -> list[Chunk]: ...
+```
+
+```python
+# backend/app/rag/registry.py — строится один раз при старте api/worker
+import logging
+from importlib.metadata import entry_points
+
+from app.rag.chunkers import (WholeChunker, SymbolsChunker,
+                              RecursiveChunker, MarkdownChunker)
+
+log = logging.getLogger(__name__)
+ENTRY_POINT_GROUP = "kb.rag.chunkers"          # ← имя-договорённость
+
+def build_registry() -> dict[str, Chunker]:
+    reg: dict[str, Chunker] = {}
+    for cls in (WholeChunker, SymbolsChunker, RecursiveChunker, MarkdownChunker):
+        reg[cls.name] = cls()                                   # встроенные
+    for ep in entry_points(group=ENTRY_POINT_GROUP):            # ← внешние пакеты
+        try:
+            obj = ep.load()                                     # импорт класса из пакета
+            name = getattr(obj, "name", ep.name)
+            if name in reg:
+                log.warning("чанкер %s: дубль, пропущен", name)
+                continue
+            if not callable(getattr(obj, "chunk", None)):
+                raise TypeError("нет метода chunk(text, params)")
+            reg[name] = obj
+        except Exception:
+            log.exception("чанкер %s не загрузился", ep.value)  # битый плагин не валит старт
+    return reg
+
+_REGISTRY: dict[str, Chunker] | None = None
+
+def get_registry() -> dict[str, Chunker]:
+    global _REGISTRY
+    if _REGISTRY is None:
+        _REGISTRY = build_registry()
+    return _REGISTRY
+```
+
+### А.2. Сторона плагина — отдельный пакет
+
+```
+kb-chunker-gost/
+├── pyproject.toml
+└── kb_chunker_gost/
+    └── __init__.py
+```
+
+```toml
+# pyproject.toml — вся интеграция с системой в этих трёх строках
+[project]
+name = "kb-chunker-gost"
+version = "0.1.0"
+
+[project.entry-points."kb.rag.chunkers"]
+gost_sections = "kb_chunker_gost:GostSectionsChunker"
+```
+
+```python
+# kb_chunker_gost/__init__.py — чанкер регламентов: нумерованные разделы + приложения
+import re
+from dataclasses import dataclass, field
+
+@dataclass
+class Chunk:
+    content: str
+    meta: dict = field(default_factory=dict)
+
+class GostSectionsChunker:
+    name = "gost_sections"
+    _HDR = re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+\S|Приложение\s+[А-Я])", re.M)
+
+    def chunk(self, text: str, params: dict) -> list[Chunk]:
+        max_len = int(params.get("max_len", 2000))
+        hits = list(self._HDR.finditer(text))
+        if not hits:
+            return [Chunk(text[:max_len], {"chunker": self.name})]
+        out = []
+        for i, h in enumerate(hits):
+            end = hits[i + 1].start() if i + 1 < len(hits) else len(text)
+            out.append(Chunk(text[h.start():end].strip()[:max_len], {
+                "chunker": self.name, "section": h.group(0).strip(), "offset": h.start(),
+            }))
+        return out
+```
+
+### А.3. Подключение
+
+Способ 1 (рекомендуемый, детерминированный): пакет — зависимость образов
+api/worker, одна строка в `backend/pyproject.toml`:
+
+```toml
+dependencies = [
+  # …существующие…
+  "kb-chunker-gost @ git+https://git.internal/kb/kb-chunker-gost.git@v0.1.0",
+]
+```
+
+`docker compose build api worker` → перезапуск. Изменений в коде системы нет —
+меняется только окружение.
+
+Способ 2 (экспериментальный, без пересборки образа): entrypoint при флаге
+`KB_PLUGINS=1` ставит `pip install --no-cache-dir /opt/plugins/*.whl` из
+примонтированного каталога перед стартом uvicorn/celery. Минусы: зависимость
+старта от сети, невоспроизводимость. Для продуктива — способ 1.
+
+### А.4. Рантайм
+
+1. Старт → `get_registry()` → `{whole, symbols, recursive, markdown, gost_sections}`.
+2. СА: `PUT /admin/rag/groups/{id}/config` `{"chunker": "gost_sections",
+   "params": {"max_len": 1500}}` — сохранение валидируется по реестру
+   (неизвестное имя → 400 + список доступных).
+3. `rag.index_material` разрешает конфиг по цепочке групп (§3.2), берёт
+   `registry["gost_sections"]`, вызывает `.chunk(text, params)`. Конвейер
+   про ГОСТ ничего не знает — только контракт.
+
+Итог по требованию 5: новый режим чанкования = маленький автономный пакет
+(тестируется pytest'ом без системы), подключаемый строкой зависимости;
+реестр/конфигурация/конвейер/переиндексация уже существуют в системе.

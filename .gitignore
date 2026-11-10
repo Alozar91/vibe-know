@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+# TLS-сертификаты (README §5) — только на сервере
+deploy/nginx/certs/
 
 # --- Python (backend) ---
 __pycache__/
@@ -37,3 +39,4 @@ desktop.ini
 
 # --- Kilo local config (contains API keys) ---
 kilo.jsonc
+nginx/acme/

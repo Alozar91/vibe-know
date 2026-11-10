@@ -69,22 +69,27 @@ services:
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
-      # Hostname v2: issuer фиксирован (KC_PUBLIC_URL, по умолчанию локальный стенд).
-      # Строгий режим обязателен: при strict=false hostname резолвится из Host-заголовка,
-      # и introspection через внутренний URL (Host: keycloak:8080) даёт iss-несоответствие
-      # → active:false (keycloak/keycloak#15694). TLS/prod-режим (https://домен/auth за
-      # nginx) — при внедрении (шаг [6], инструкция deploy/README.md).
-      KC_HOSTNAME: ${KB_PUBLIC_URL:-http://localhost}:8080
+      # Hostname v2: issuer фиксирован (KB_PUBLIC_URL; локальный стенд —
+      # http://localhost:8080). Строгий режим обязателен: при strict=false hostname
+      # резолвится из Host-заголовка, и introspection через внутренний URL
+      # (Host: keycloak:8080) даёт iss-несоответствие → active:false
+      # (keycloak/keycloak#15694).
+      # TLS за nginx (KB_PUBLIC_URL=https://домен): KC_HOSTNAME=https://домен/auth,
+      # порт 8080 наружу не публикуется — схема README §5.
+      KC_HOSTNAME: ${KC_HOSTNAME_URL:-http://localhost:8080}
       KC_HOSTNAME_STRICT: "true"
       KC_PROXY_HEADERS: xforwarded
       # Переменные для подстановки ${VAR} в realm-kb-test.json при импорте.
       # KB_PUBLIC_URL (публичный адрес стенда, http://IP или https://домен) —
-      # также KC_HOSTNAME выше, issuer/CORS api/worker и build-arg SPA.
+      # также KC_HOSTNAME_URL (см. ниже), issuer/CORS api/worker и build-arg SPA.
       # Не задан → пустая строка в JSON (записи «/*»/«» безвредны), localhost-дефолты.
       KB_API_CLIENT_SECRET: ${KB_API_CLIENT_SECRET}
       KB_CLI_CLIENT_SECRET: ${KB_CLI_CLIENT_SECRET}
       KB_TEST_PASSWORD: ${KB_TEST_PASSWORD}
       KB_PUBLIC_URL: ${KB_PUBLIC_URL:-}
+      # Адрес Keycloak (issuer): https://домен → https://домен/auth (TLS за nginx,
+      # порт 8080 наружу не публикуется); иначе http://…:8080 напрямую. См. .env.
+      KC_HOSTNAME_URL: ${KC_HOSTNAME_URL:-http://localhost:8080}
     volumes:
       - ./keycloak/realm-kb-test.json:/opt/keycloak/data/import/realm-kb-test.json:ro
     ports:
@@ -188,7 +193,7 @@ services:
       KB_S3_ACCESS_KEY: ${SILO_ROOT_USER}
       KB_S3_SECRET_KEY: ${SILO_ROOT_PASSWORD}
       KB_GOTENBERG_URL: http://gotenberg:3000
-      KB_OIDC_ISSUER: ${KB_PUBLIC_URL:-http://localhost}:8080/realms/kb
+      KB_OIDC_ISSUER: ${KC_HOSTNAME_URL:-http://localhost:8080}/realms/kb
       KB_OIDC_INTROSPECTION_URL: http://keycloak:8080/realms/kb/protocol/openid-connect/token/introspect
       KB_OIDC_CLIENT_ID: kb-api
       KB_OIDC_CLIENT_SECRET: ${KB_API_CLIENT_SECRET}
@@ -232,7 +237,7 @@ services:
       KB_S3_ACCESS_KEY: ${SILO_ROOT_USER}
       KB_S3_SECRET_KEY: ${SILO_ROOT_PASSWORD}
       KB_GOTENBERG_URL: http://gotenberg:3000
-      KB_OIDC_ISSUER: ${KB_PUBLIC_URL:-http://localhost}:8080/realms/kb
+      KB_OIDC_ISSUER: ${KC_HOSTNAME_URL:-http://localhost:8080}/realms/kb
       KB_OIDC_INTROSPECTION_URL: http://keycloak:8080/realms/kb/protocol/openid-connect/token/introspect
       KB_OIDC_CLIENT_ID: kb-api
       KB_OIDC_CLIENT_SECRET: ${KB_API_CLIENT_SECRET}
@@ -260,8 +265,14 @@ services:
         condition: service_healthy
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # TLS (README §5): ./nginx/certs/kb.crt + kb.key (Let's Encrypt для домена).
+      # Нет сертификатов → entrypoint-скрипт создаёт self-signed placeholder.
+      # ACME webroot для certbot renew без остановки nginx.
+      - ./nginx/certs:/etc/nginx/certs
+      - ./nginx/acme:/var/www/certbot
     ports:
       - "80:80"
+      - "443:443"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz"]
       interval: 10s

@@ -53,7 +53,8 @@ cp deploy/.env.example deploy/.env
 | `BACKUP_RESTIC_PASSWORD` | Пароль шифрования restic-репозитория; смена = старые снапшоты нечитаемы |
 | `BACKUP_INTERVAL_SECONDS` | Интервал цикла копирования (86400 = сутки) |
 | `LOG_LEVEL`, `LOG_MAX_SIZE`, `LOG_MAX_FILE` | Логи приложений и ротация логов контейнеров (HLD §8.3) |
-| `KB_PUBLIC_URL` | Публичный адрес стенда для доступа извне (`http://IP` или `https://домен`): адрес Keycloak в SPA (build-arg), issuer, redirectUris realm, CORS. Пусто — локальный стенд (`localhost`); менять → `docker compose build nginx keycloak api worker` + `down/up keycloak` (realm уже в БД — redirectUris обновятся только при пересоздании realm, `down -v`) |
+| `KB_PUBLIC_URL` | Публичный адрес стенда (`http://IP` или `https://домен`): redirectUris realm, CORS api, адрес Keycloak в SPA (build-arg nginx). Пусто — локальный стенд. Смена после первого импорта realm — только `down -v` или правка в консоли Keycloak |
+| `KC_HOSTNAME_URL` | Адрес Keycloak (issuer): для `KB_PUBLIC_URL=https://домен` — `https://домен/auth` (TLS за nginx, порт 8080 закрыт); для `http://IP` — `http://IP:8080` |
 
 ### 2.3. Запуск
 
@@ -172,23 +173,39 @@ docker compose run --rm --entrypoint bash backup -c "\
 
 ## 5. TLS (FR-149) — настройка при внедрении
 
-В MVP стек работает по HTTP (решение по этапу 11: TLS — при внедрении). Проверенная
-на этапе 11 схема (31/31 сценариев проходили поверх TLS):
+Схема для доменного имени (проверена на этапе 11: 31/31 сценариев поверх TLS).
+Итог: Keycloak для браузера доступен только через nginx по `/auth` (порт 8080
+наружу закрыт), issuer = `https://домен/auth/realms/kb`.
 
-1. Сертификат (SAN обязателен для современных клиентов):
+1. DNS: A-запись домена → IP сервера.
+2. Сертификат (SAN обязателен для современных клиентов); рабочий вариант —
+   Let's Encrypt (certbot на хосте, см. шаг 6):
    ```bash
-   openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
-     -keyout deploy/nginx/certs/kb.key -out deploy/nginx/certs/kb.crt \
-     -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+   sudo apt install certbot && sudo certbot certonly --standalone -d merch-vibe.ru
+   # сертификаты: /etc/letsencrypt/live/merch-vibe.ru/{fullchain.pem,privkey.pem}
+   # (для самоподписанного — openssl req -x509 -newkey rsa:2048 -nodes -days 365
+   #  -keyout kb.key -out kb.crt -subj "/CN=merch-vibe.ru"
+   #  -addext "subjectAltName=DNS:merch-vibe.ru")
    ```
-2. nginx: второй `server { listen 443 ssl; ... }` с `ssl_certificate`,
-   `ssl_certificate_key`; `location /auth/ { proxy_pass http://keycloak_upstream/; }`
-   — **URI-часть «/» обязательна** (отрезает префикс `/auth` перед прокси на Keycloak).
-3. Keycloak (environment в compose): `KC_HOSTNAME: https://localhost/auth`,
-   `KC_HOSTNAME_STRICT: "true"`, `KC_PROXY_HEADERS: xforwarded`; порт 8080 наружу
-   не публиковать. Issuer станет `https://localhost/auth/realms/kb`.
-4. Frontend: собрать с `KC_BASE='/auth/realms/kb'` (Vite-переменная, `frontend/`).
-5. `docker compose up -d --build nginx keycloak api worker frontend`.
+3. Положить сертификаты в `deploy/nginx/certs/kb.crt` + `kb.key` (например,
+   копией из letsencrypt live; каталог в .gitignore). `.env`:
+   ```ini
+   KB_PUBLIC_URL=https://merch-vibe.ru
+   KC_HOSTNAME_URL=https://merch-vibe.ru/auth
+   ```
+4. Frontend: адрес Keycloak для SPA задаётся автоматически build-arg'ом nginx-образа
+   из `KB_PUBLIC_URL` (VITE_KC_BASE = `https://домен/auth/realms/kb`).
+5. `docker compose up -d --build nginx keycloak api worker`.
+   Realm-импорт содержит `${KB_PUBLIC_URL}` в redirectUris — realm должен
+   создаваться при уже заданной переменной (при смене адреса: `down -v` +
+   повторный сид, см. §7, либо правка redirectUris в консоли Keycloak).
+6. Обновление сертификата Let's Encrypt (раз в ~60 дней, cron):
+   ```bash
+   sudo certbot renew --standalone   # останавливает nginx на секунды: pre/post hook
+   cp /etc/letsencrypt/live/merch-vibe.ru/fullchain.pem deploy/nginx/certs/kb.crt
+   cp /etc/letsencrypt/live/merch-vibe.ru/privkey.pem  deploy/nginx/certs/kb.key
+   docker compose exec nginx nginx -s reload
+   ```
 
 ## 6. Обслуживание
 

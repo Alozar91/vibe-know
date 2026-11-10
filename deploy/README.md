@@ -178,34 +178,39 @@ docker compose run --rm --entrypoint bash backup -c "\
 наружу закрыт), issuer = `https://домен/auth/realms/kb`.
 
 1. DNS: A-запись домена → IP сервера.
-2. Сертификат (SAN обязателен для современных клиентов); рабочий вариант —
-   Let's Encrypt (certbot на хосте, см. шаг 6):
-   ```bash
-   sudo apt install certbot && sudo certbot certonly --standalone -d merch-vibe.ru
-   # сертификаты: /etc/letsencrypt/live/merch-vibe.ru/{fullchain.pem,privkey.pem}
-   # (для самоподписанного — openssl req -x509 -newkey rsa:2048 -nodes -days 365
-   #  -keyout kb.key -out kb.crt -subj "/CN=merch-vibe.ru"
-   #  -addext "subjectAltName=DNS:merch-vibe.ru")
-   ```
-3. Положить сертификаты в `deploy/nginx/certs/kb.crt` + `kb.key` (например,
-   копией из letsencrypt live; каталог в .gitignore). `.env`:
+2. `.env` — задать **до первого `up`** (realm-импорт подставляет их в
+   redirectUris один раз; смена позже — `down -v` или консоль Keycloak):
    ```ini
    KB_PUBLIC_URL=https://merch-vibe.ru
    KC_HOSTNAME_URL=https://merch-vibe.ru/auth
    ```
-4. Frontend: адрес Keycloak для SPA задаётся автоматически build-arg'ом nginx-образа
-   из `KB_PUBLIC_URL` (VITE_KC_BASE = `https://домен/auth/realms/kb`).
-5. `docker compose up -d --build nginx keycloak api worker`.
-   Realm-импорт содержит `${KB_PUBLIC_URL}` в redirectUris — realm должен
-   создаваться при уже заданной переменной (при смене адреса: `down -v` +
-   повторный сид, см. §7, либо правка redirectUris в консоли Keycloak).
-6. Обновление сертификата Let's Encrypt (раз в ~60 дней, cron):
+3. Сертификат. Рабочий вариант — Let's Encrypt; nginx принимает и самоподписанный
+   (в `certs/` уже лежит placeholder, генерируемый `tls-fallback.sh` при старте).
+   Первый выпуск (webroot через работающий nginx — nginx уже должен быть запущен):
    ```bash
-   sudo certbot renew --standalone   # останавливает nginx на секунды: pre/post hook
-   cp /etc/letsencrypt/live/merch-vibe.ru/fullchain.pem deploy/nginx/certs/kb.crt
-   cp /etc/letsencrypt/live/merch-vibe.ru/privkey.pem  deploy/nginx/certs/kb.key
-   docker compose exec nginx nginx -s reload
+   sudo apt install certbot
+   sudo certbot certonly --webroot -w deploy/nginx/acme -d merch-vibe.ru \
+     --deploy-hook "cp /etc/letsencrypt/live/merch-vibe.ru/fullchain.pem deploy/nginx/certs/kb.crt && cp /etc/letsencrypt/live/merch-vibe.ru/privkey.pem deploy/nginx/certs/kb.key && cd deploy && docker compose exec nginx nginx -s reload"
+   # сертификаты: /etc/letsencrypt/live/merch-vibe.ru/{fullchain.pem,privkey.pem}
+   # (альтернатива для стендов без домена — самоподписанный:
+   #  openssl req -x509 -newkey rsa:2048 -nodes -days 365 -keyout kb.key -out kb.crt
+   #  -subj "/CN=merch-vibe.ru" -addext "subjectAltName=DNS:merch-vibe.ru")
    ```
+   Сами файлы `deploy/nginx/certs/kb.{crt,key}` — в .gitignore, только на сервере.
+4. `docker compose up -d --build` — SPA получит адрес Keycloak автоматически
+   (build-arg nginx из `KB_PUBLIC_URL` → VITE_KC_BASE = `https://домен/auth/realms/kb`).
+5. Обновление сертификата (раз в ~60 дней, автоматически deploy-hook'ом из п. 3;
+   при webroot nginx не останавливается):
+   ```bash
+   sudo certbot renew --dry-run   # проверка автопродления
+   ```
+
+### 5.1. Порядок первого выпуска сертификата (webroot требует работающий nginx)
+
+На чистом сервере nginx стартует с self-signed placeholder (fallback) — HTTP
+работает сразу. Затем webroot-выпуск п. 3, deploy-hook копирует сертификаты в
+`certs/` и перезагружает nginx — TLS сразу с боевым сертификатом. Контейнеру
+доступен каталог ACME (`deploy/nginx/acme` → `/var/www/certbot` в nginx).
 
 ## 6. Обслуживание
 

@@ -24,13 +24,21 @@ function b64url(bytes: Uint8Array): string {
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-async function sha256(input: string): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input)))
+// PKCE: S256 (crypto.subtle — только secure context: HTTPS или localhost);
+// на http://домен subtle недоступен — fallback на plain (RFC 7636 §4.2:
+// challenge = verifier; Keycloak 26 поддерживает). При включении TLS (FR-149)
+// S256 восстановится автоматически — secure context вернётся.
+async function pkcePair(verifier: string): Promise<{ challenge: string; method: 'S256' | 'plain' }> {
+  if (typeof crypto.subtle !== 'undefined') {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))
+    return { challenge: b64url(new Uint8Array(digest)), method: 'S256' }
+  }
+  return { challenge: verifier, method: 'plain' }
 }
 
 export async function login(): Promise<void> {
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)))
-  const challenge = b64url(await sha256(verifier))
+  const { challenge, method } = await pkcePair(verifier)
   sessionStorage.setItem('pkce_verifier', verifier)
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
@@ -38,7 +46,7 @@ export async function login(): Promise<void> {
     response_type: 'code',
     scope: 'openid profile email',
     code_challenge: challenge,
-    code_challenge_method: 'S256',
+    code_challenge_method: method,
   })
   window.location.href = `${KC_BASE}/protocol/openid-connect/auth?${params}`
 }
@@ -136,7 +144,7 @@ export function logout(): void {
 // registrations без контекста аутентификации даёт «Page not found».
 export async function register(): Promise<void> {
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)))
-  const challenge = b64url(await sha256(verifier))
+  const { challenge, method } = await pkcePair(verifier)
   sessionStorage.setItem('pkce_verifier', verifier)
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
@@ -144,7 +152,7 @@ export async function register(): Promise<void> {
     response_type: 'code',
     scope: 'openid profile email',
     code_challenge: challenge,
-    code_challenge_method: 'S256',
+    code_challenge_method: method,
     kc_action: 'register',
   })
   window.location.href = `${KC_BASE}/protocol/openid-connect/auth?${params}`

@@ -14,7 +14,10 @@ COPY pyproject.toml ./
 # недоступен с сервера (таймауты CDN), например https://pypi.tuna.tsinghua.edu.cn.
 # Резолв и скачивание целиком идут с зеркала; пусто — официальный PyPI.
 ARG UV_PYPI_MIRROR=""
+# Таймауты выше дефолта (10 с соединение / 30 с чтение): медленное, но живое
+# зеркало не должно ронять сборку. UV_HTTP_RETRIES поднят с 3 до 5.
 RUN if [ -n "$UV_PYPI_MIRROR" ]; then export UV_DEFAULT_INDEX="$UV_PYPI_MIRROR"; fi \
+    && export UV_HTTP_CONNECT_TIMEOUT=30 UV_HTTP_TIMEOUT=120 UV_HTTP_RETRIES=5 \
     && uv sync --no-dev --no-install-project
 
 # Код приложения

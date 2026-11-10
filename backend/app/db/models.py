@@ -395,6 +395,14 @@ class Material(TimestampMixin, Base):
     # Этап 8 (LLD §7.1): FTS-конфигурация и вектор (не generated — динамическая конфигурация)
     search_lang: Mapped[str] = mapped_column(String(20), nullable=False, server_default="russian")
     search_tsv: Mapped[str | None] = mapped_column(TSVector, nullable=True)
+    # Пост-MVP шаг [7] (RAG_DESIGN §2): состояние конвейера индексации
+    # (none/pending/indexed/error; по образцу file_objects §6.4 LLD)
+    rag_state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="none", server_default="none"
+    )
+    rag_stale: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     version: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

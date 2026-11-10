@@ -178,6 +178,11 @@ def upload_file(
 
     update_search_vector(db, m)
 
+    # Пост-MVP [7]: RAG-хук (§5) — pending при замене файла/текста
+    from app.rag.indexing import hook_after_change
+
+    hook_after_change(db, m)
+
     pending_enqueue = [ref for ref in (getattr(db, "_pending_task_refs", None) or [])]
     db.commit()
 
@@ -191,6 +196,11 @@ def upload_file(
                 files_scan.apply_async(args=[task_id, file_id])
             except Exception:
                 pass
+
+    # RAG: постановка после коммита (§5)
+    from app.rag.indexing import flush_rag_enqueue
+
+    flush_rag_enqueue(db)
 
     return {
         "id": str(m.id),

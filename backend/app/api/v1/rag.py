@@ -1,8 +1,11 @@
-# RAG — транспорт СА-контура (RAG_DESIGN §3, §8-1).
+# RAG — транспорт СА-контура (RAG_DESIGN §3, §6, §8-1/2).
 #   GET    /admin/rag/chunkers               — реестр чанкеров (для UI)
 #   GET    /admin/rag/groups/{id}/config     — явный + effective конфиг
 #   PUT    /admin/rag/groups/{id}/config     — создать/обновить (валидация реестром)
 #   DELETE /admin/rag/groups/{id}/config     — снять явную настройку (наследовать)
+#   POST   /admin/rag/test-connection        — проверка embedding-провайдера (§6)
+#   POST   /admin/rag/materials/{id}:reindex — ручная переиндексация материала
+#   POST   /admin/rag/groups/{id}:reindex    — переиндексация поддерева группы
 import uuid
 
 from fastapi import APIRouter, Depends
@@ -11,6 +14,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import CurrentUserDep
 from app.db.engine import get_db
 from app.use_cases import rag
+from app.use_cases.errors import DomainError
 from app.use_cases.lifecycle.audit import audit_log
 from app.use_cases.permissions.cache import commit_rights
 
@@ -62,3 +66,76 @@ def delete_config_ep(group_id: uuid.UUID, user: CurrentUserDep, db=Depends(get_d
     rag.delete_group_config(db, str(group_id))
     audit_log(db, user, "rag.group_config_delete", "group", group_id, details={})
     commit_rights(db)
+
+
+@router.post("/admin/rag/test-connection")
+def test_connection_ep(user: CurrentUserDep) -> dict:
+    """Проверка embedding-провайдера до включения индексации (RAG_DESIGN §6)."""
+    _require(user.is_super)
+    from app.config import get_settings
+    from app.rag.embeddings import EmbeddingClient, EmbeddingError
+
+    client = EmbeddingClient(get_settings())
+    if not client.enabled:
+        raise DomainError(
+            status=409, code="RAG_EMBEDDING_NOT_CONFIGURED",
+            title="Конфликт данных",
+            detail="KB_RAG_EMBEDDING_BASE_URL не задан — конвейер RAG выключен",
+        )
+    try:
+        return client.probe()
+    except EmbeddingError as e:
+        raise DomainError(
+            status=502, code="RAG_EMBEDDING_UNAVAILABLE",
+            title="Конфликт данных", detail=str(e),
+        ) from e
+
+
+@router.post("/admin/rag/materials/{material_id}:reindex")
+def reindex_material_ep(material_id: uuid.UUID, user: CurrentUserDep,
+                        db=Depends(get_db)) -> dict:
+    """Ручная переиндексация одного материала (§8-1: ручная переиндексация)."""
+    _require(user.is_super)
+    from sqlalchemy import select
+
+    from app.db import models
+
+    m = db.execute(select(models.Material).where(models.Material.id == material_id)).scalar_one_or_none()
+    if m is None or m.is_deleted:
+        raise DomainError(status=404, code="NOT_FOUND", title="Не найдено",
+                          detail="Материал не найден")
+    from app.rag.indexing import hook_after_change
+
+    hook_after_change(db, m)
+    db.commit()
+    from app.rag.indexing import flush_rag_enqueue
+
+    flush_rag_enqueue(db)
+    audit_log(db, user, "rag.reindex", "material", material_id, details={})
+    return {"id": str(material_id), "state": "pending"}
+
+
+@router.post("/admin/rag/groups/{group_id}:reindex")
+def reindex_group_ep(group_id: uuid.UUID, user: CurrentUserDep,
+                     db=Depends(get_db)) -> dict:
+    """Переиндексация поддерева группы после смены конфига (§3.2, §5)."""
+    _require(user.is_super)
+    from app.db import models
+
+    g = db.get(models.Group, group_id)
+    if g is None or g.is_deleted:
+        raise DomainError(status=404, code="NOT_FOUND", title="Не найдено",
+                          detail="Группа не найдена")
+    try:
+        from app.worker.tasks import rag_reindex_group_subtree
+
+        rag_reindex_group_subtree.apply_async(args=[str(group_id)])
+    except Exception:
+        # Брокер недоступен: штатно (§9) — reconcile поднимет отставших,
+        # но для явного запроса СА честно сообщаем.
+        raise DomainError(
+            status=503, code="QUEUE_UNAVAILABLE", title="Сервис недоступен",
+            detail="Брокер задач недоступен; повторите позже",
+        ) from None
+    audit_log(db, user, "rag.reindex_group", "group", group_id, details={})
+    return {"group_id": str(group_id), "state": "enqueued"}

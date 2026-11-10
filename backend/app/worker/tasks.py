@@ -17,7 +17,6 @@ from app.logging import get_logger
 from app.use_cases.files import silo
 from app.use_cases.files.mime_detect import is_office_mime
 from app.worker import celery_app
-
 log = get_logger(__name__)
 
 # Ретраи по LLD §9
@@ -853,3 +852,131 @@ def keycloak_sync(self) -> dict:
              reactivated=reactivated, email_updated=email_updated)
     return {"checked": checked, "deactivated": deactivated,
             "reactivated": reactivated, "email_updated": email_updated}
+
+
+# ==========================================================================
+# Пост-MVP шаг [7] ч.2: RAG-конвейер индексации (RAG_DESIGN §5, §6, LLD §9)
+# ==========================================================================
+
+RAG_MAX_RETRIES = 3  # как Gotenberg (LLD §9, §14-3)
+
+
+@celery_app.task(bind=True, name="rag.index_material", max_retries=RAG_MAX_RETRIES)
+def rag_index_material(self, material_id: str) -> dict:
+    """Индексация материала: конфиг → чанки → эмбеддинг → замена (§5).
+
+    Идемпотентна (DELETE+INSERT по version_id); состояние materials.rag_state:
+    pending → indexed / error. Ретраи экспоненциально (сбой embedding-провайдера
+    — не ошибка данных); после исчерпания — rag_state='error', чинит reconcile.
+    """
+    db = get_session_factory()()
+    try:
+        from app.rag.indexing import RAG_STATE_ERROR, index_material
+
+        res = index_material(db, _uuid(material_id))
+        if res.get("result") == "error":
+            raise RuntimeError(res.get("detail") or "index_material error")
+        return res
+    except Exception as e:
+        db.rollback()
+        try_count = self.request.retries + 1
+        if try_count <= RAG_MAX_RETRIES:
+            raise self.retry(exc=e, countdown=30 * (2 ** (try_count - 1)))
+        # Исчерпали ретраи: состояние на материале (сверка поднимет)
+        from app.rag.indexing import RAG_STATE_ERROR
+
+        try:
+            m = db.get(models.Material, _uuid(material_id))
+            if m is not None:
+                m.rag_state = RAG_STATE_ERROR
+                db.commit()
+        except Exception:  # noqa: BLE001 — не маскировать исходный сбой
+            db.rollback()
+        log.warning("rag.index_material.failed", material=material_id,
+                    error=f"{type(e).__name__}: {e}")
+        return {"result": "error", "detail": f"{type(e).__name__}: {e}"}
+    finally:
+        db.close()
+
+
+@celery_app.task(name="rag.reindex_group_subtree")
+def rag_reindex_group_subtree(group_id: str) -> dict:
+    """Переиндексация поддерева после смены конфига группы (§3.2, §5).
+
+    Наследующие поддеревья пересчитывают effective (resolve_effective);
+    материалы с собственной явной настройкой переиндексируются тем же чанкером —
+    лишний прогон дешевле точной вычислимой выборки.
+    """
+    db = get_session_factory()()
+    try:
+        g = db.get(models.Group, _uuid(group_id))
+        if g is None or g.is_deleted:
+            return {"result": "missing"}
+        from app.rag.indexing import reindex_group_subtree_ids
+
+        ids = reindex_group_subtree_ids(db, g.path)
+        for mid in ids:
+            rag_index_material.apply_async(args=[str(mid)])
+        log.info("rag.reindex_group_subtree", group=group_id, materials=len(ids))
+        return {"result": "enqueued", "materials": len(ids)}
+    finally:
+        db.close()
+
+
+@celery_app.task(name="rag.reconcile")
+def rag_reconcile() -> dict:
+    """Свёрка (beat, ежечасно, §5): rag_stale / чужая модель / расхождение
+    content_hash → переиндексация. Отчёт — суммарный (journal-лог)."""
+    db = get_session_factory()()
+    try:
+        if db.bind.dialect.name == "sqlite":
+            return {"reindexed": 0, "skipped": "sqlite"}
+        from app.rag.indexing import resolve_defaults
+        from sqlalchemy import func
+
+        defaults = resolve_defaults(db)
+        if not defaults["enabled"]:
+            return {"reindexed": 0, "skipped": "rag disabled"}
+
+        # 1) Отставшие по состоянию (хук не дошёл / задача потерялась)
+        stale_ids = db.execute(
+            select(models.Material.id).where(
+                models.Material.rag_stale == True,  # noqa: E712
+                models.Material.is_deleted == False,  # noqa: E712
+            )
+        ).scalars().all()
+
+        # 2) Чанки чужой embedding-модели (смена модели без переиндекса)
+        from app.config import get_settings
+
+        settings = get_settings()
+        model_mismatch = []
+        if settings.rag_embedding_base_url:
+            model_mismatch = db.execute(
+                select(models.RagChunk.material_id)
+                .where(models.RagChunk.embedding_model != settings.rag_embedding_model)
+                .group_by(models.RagChunk.material_id)
+                .limit(500)
+            ).scalars().all()
+
+        # 3) Сверка content_hash — внутри index_material (fast-path: чанки
+        #    совпали → без переэмбеддинга, §5); error-состояния тоже поднимаем
+        error_ids = db.execute(
+            select(models.Material.id).where(
+                models.Material.rag_state == "error",
+                models.Material.is_deleted == False,  # noqa: E712
+            )
+        ).scalars().all()
+
+        candidates = sorted(set(stale_ids) | set(model_mismatch) | set(error_ids))
+        reindexed = 0
+        for mid in candidates:
+            rag_index_material.apply_async(args=[str(mid)])
+            reindexed += 1
+        log.info("rag.reconcile", stale=len(stale_ids),
+                 model_mismatch=len(model_mismatch), error=len(error_ids),
+                 enqueued=reindexed)
+        return {"reindexed": reindexed, "stale": len(stale_ids),
+                "model_mismatch": len(model_mismatch), "error": len(error_ids)}
+    finally:
+        db.close()

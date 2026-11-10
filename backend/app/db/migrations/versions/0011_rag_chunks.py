@@ -78,6 +78,31 @@ def upgrade() -> None:
     op.create_index("ix_rag_chunks_material", "rag_chunks", ["material_id"])
     op.create_index("ix_rag_chunks_group", "rag_chunks", ["group_id"])
 
+    # --- Состояние конвейера на материале (§2, по образцу file_objects §6.4) ---
+    op.add_column(
+        "materials",
+        sa.Column("rag_state", sa.String(16), nullable=False, server_default="none"),
+    )
+    op.add_column(
+        "materials",
+        sa.Column("rag_stale", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+    )
+    op.create_index("ix_materials_rag_stale", "materials", ["rag_stale"])
+
+    # --- Сид параметров RAG (§3.1: системный уровень — реестр настроек) ---
+    rag_seed = [
+        ("rag.enabled", "true", "RAG (пост-MVP шаг [7]): конвейер индексации включён"),
+        ("rag.default_chunker", '"recursive"', "RAG: чанкер по умолчанию (без явной настройки группы)"),
+        ("rag.default_params", "{}", "RAG: параметры чанкера по умолчанию"),
+    ]
+    for key, value, description in rag_seed:
+        op.execute(
+            sa.text(
+                "INSERT INTO system_settings (key, value, description) "
+                "VALUES (:k, CAST(:v AS jsonb), :d)"
+            ).bindparams(k=key, v=value, d=description)
+        )
+
     if _is_pg():
         op.execute(
             "CREATE INDEX ix_rag_chunks_hnsw ON rag_chunks "
@@ -88,6 +113,10 @@ def upgrade() -> None:
 def downgrade() -> None:
     if _is_pg():
         op.execute("DROP INDEX IF EXISTS ix_rag_chunks_hnsw")
+    op.execute("DELETE FROM system_settings WHERE key LIKE 'rag.%'")
+    op.drop_index("ix_materials_rag_stale", table_name="materials")
+    op.drop_column("materials", "rag_stale")
+    op.drop_column("materials", "rag_state")
     op.drop_index("ix_rag_chunks_group", table_name="rag_chunks")
     op.drop_index("ix_rag_chunks_material", table_name="rag_chunks")
     op.drop_index("uq_rag_chunks_version_ord", table_name="rag_chunks")

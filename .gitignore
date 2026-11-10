@@ -11,6 +11,9 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+# uv.lock удалён из репозитория (резолв при сборке, зеркало — UV_PYPI_MIRROR);
+# локальный lock не коммитится
+backend/uv.lock
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

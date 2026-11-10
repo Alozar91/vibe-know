@@ -1,0 +1,155 @@
+{
+  "realm": "kb",
+  "enabled": true,
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "resetPasswordAllowed": true,
+  "rememberMe": false,
+  "verifyEmail": false,
+  "sslRequired": "none",
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 28800,
+  "ssoSessionMaxLifespan": 86400,
+  "passwordPolicy": "length(8) and notUsername",
+  "clients": [
+    {
+      "clientId": "kb-spa",
+      "name": "Веб-клиент (SPA, Authorization Code + PKCE)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost/*",
+        "https://localhost/*",
+        "http://localhost:5173/*"
+      ],
+      "webOrigins": [
+        "http://localhost",
+        "https://localhost",
+        "http://localhost:5173"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "audience-kb-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "kb-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "kb-api",
+      "name": "API (Token Introspection, LLD §10)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "${KB_API_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "service_account",
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "basic",
+        "email",
+        "kc-admin-api"
+      ],
+      "protocolMappers": [
+        {
+          "name": "audience-kb-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "kb-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "kb-cli",
+      "name": "Тестовый клиент (client credentials / direct grant для API-тестов)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "${KB_CLI_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "audience-kb-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "kb-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-kb-api",
+      "enabled": true,
+      "serviceAccountClientId": "kb-api",
+      "clientRoles": {
+        "realm-management": ["view-users"]
+      }
+    },
+    {
+      "username": "ivanov",
+      "enabled": true,
+      "email": "ivanov@example.local",
+      "firstName": "Иван",
+      "lastName": "Иванов",
+      "credentials": [
+        { "type": "password", "value": "${KB_TEST_PASSWORD}", "temporary": false }
+      ]
+    },
+    {
+      "username": "petrov",
+      "enabled": true,
+      "email": "petrov@example.local",
+      "firstName": "Пётр",
+      "lastName": "Петров",
+      "credentials": [
+        { "type": "password", "value": "${KB_TEST_PASSWORD}", "temporary": false }
+      ]
+    },
+    {
+      "username": "sidorova",
+      "enabled": true,
+      "email": "sidorova@example.local",
+      "firstName": "Анна",
+      "lastName": "Сидорова",
+      "credentials": [
+        { "type": "password", "value": "${KB_TEST_PASSWORD}", "temporary": false }
+      ]
+    }
+  ]
+}

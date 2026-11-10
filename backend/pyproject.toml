@@ -1,0 +1,34 @@
+# Приложение «Корпоративная база знаний» — backend (этап 1: фундамент).
+# Контракт: LLD §2 (модель), §9 (задачи), §12 (API); версии — HLD §4.
+[project]
+name = "kb-backend"
+version = "0.1.0"
+description = "Корпоративная база знаний — REST API и фоновые задачи (MVP)"
+requires-python = ">=3.15"
+dependencies = [
+    "fastapi>=0.129.0",
+    "uvicorn[standard]>=0.41.0",
+    "pydantic>=2.13",
+    "pydantic-settings>=2.13",
+    "sqlalchemy>=2.0.45",
+    "alembic>=1.18",
+    "psycopg[binary,pool]>=3.2.13",
+    "celery[redis]>=5.6",
+    "redis>=7.2",
+    "httpx>=0.28",
+    "prometheus-client>=0.24",
+    "python-multipart>=0.0.20",
+    "structlog>=25.8",
+    "boto3>=1.36",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "pytest-asyncio>=1.3",
+    "httpx>=0.28",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

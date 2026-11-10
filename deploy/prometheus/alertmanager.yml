@@ -1,0 +1,14 @@
+# Заглушка на MVP: SMTP не настроен — алертинг отключён (US-040 A1, NFR-019).
+# При внедрении: receivers с email_configs на адрес СА, route по алертам.
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: none
+  group_by: ['alertname']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: none

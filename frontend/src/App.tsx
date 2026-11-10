@@ -144,7 +144,7 @@ export default function App() {
   const [authed, setAuthed] = useState(false)
   const [view, setView] = useState<View>({ kind: 'browser' })
   const [refreshToken, setRefreshToken] = useState(0)
-  const [me, setMe] = useState<{ display_name?: string; is_super?: boolean; roles?: string[] } | null>(null)
+  const [me, setMe] = useState<{ id?: string; display_name?: string; is_super?: boolean; roles?: string[] } | null>(null)
   const [searchQ, setSearchQ] = useState('')
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const unread = useUnreadCount()
@@ -170,19 +170,18 @@ export default function App() {
 
   useEffect(() => {
     if (!authed) return
-    api<{ display_name: string; is_super?: boolean; roles?: string[] }>('/me')
+    api<{ id?: string; display_name: string; is_super?: boolean; roles?: string[] }>('/me')
       .then(setMe)
       .catch(() => setAuthed(false))
   }, [authed, refreshToken])
 
   // Перезагрузить /me после закрытия экрана тестовой регистрации.
-  // «Пока не выбирать» запоминается на сессию вкладки: без роли пользователь
-  // видит систему в объёме default deny (§3.2), выбор можно продолжить позже.
+  // «Пока не выбирать» запоминается на сессию вкладки (sessionStorage) и
+  // привязано к пользователю (ключ с user_id) — иначе флаг одной проверки
+  // погасит оффер другому пользователю, вошедшему в той же вкладке.
   function afterRoleChoice(dismiss = false) {
-    if (dismiss) sessionStorage.setItem('kb-rolepick-dismissed', '1')
-    setMe(null)
-    setAuthed(false)
-    setTimeout(() => setAuthed(isAuthenticated()), 0)
+    if (dismiss && me?.id) sessionStorage.setItem(`kb-rolepick-dismissed:${me.id}`, '1')
+    setRefreshToken((x) => x + 1)
   }
 
   if (!ready) {
@@ -213,8 +212,10 @@ export default function App() {
 
   // Тестовая регистрация (НЕ для продуктива): пока у пользователя нет ролей,
   // показываем одноразовый экран выбора роли (флаг проверит GET-оффер).
-  // «Пока не выбирать» гасит экран до конца сессии вкладки (sessionStorage)
-  if (me && !me.is_super && (me.roles ?? []).length === 0 && !sessionStorage.getItem('kb-rolepick-dismissed')) {
+  // «Пока не выбирать» гасит экран до конца сессии вкладки — ключ флага
+  // привязан к пользователю (см. afterRoleChoice).
+  if (me?.id && !me.is_super && (me.roles ?? []).length === 0
+      && !sessionStorage.getItem(`kb-rolepick-dismissed:${me.id}`)) {
     return <RolePicker onDone={afterRoleChoice} />
   }
 

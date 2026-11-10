@@ -1,9 +1,10 @@
 # Тестовая регистрация с выбором роли (НЕ для продуктива; вне LLD — фича стенда).
 # Пользователь создаётся штатно при первом запросе (FR-013, provision_user); после
 # входа он не имеет ни одной роли (default deny, §3.2) и не видит систему. Здесь
-# он может один раз выбрать себе роль из допустимого списка — запись user_roles,
-# как делает СА (FR-007). Включается флагом KB_TEST_REGISTRATION=true; на
-# продуктиве флаг не задаётся.
+# он может один раз выбрать себе роль — запись user_roles, как делает СА (FR-007),
+# включая «Системного администратора» (стенд: пользователь сам себе СА). Виртуальная
+# роль «Все пользователи» не выбирается. Включается флагом KB_TEST_REGISTRATION=true;
+# на продуктиве флаг не задаётся.
 import uuid
 
 from sqlalchemy import select
@@ -14,12 +15,6 @@ from app.db import models
 from app.use_cases.errors import DomainError
 from app.use_cases.lifecycle.audit import audit_log
 from app.use_cases.permissions.cache import commit_rights
-from app.use_cases.roles.constants import SUPERUSER_ROLE_NAME
-
-# Роли, которые нельзя получить через тестовую регистрацию
-FORBIDDEN_ROLE_NAMES = (SUPERUSER_ROLE_NAME,)
-# Право, при наличии которого в шаблоне роль не предлагается (сам себе СА)
-_PRIV_MANAGE = models.PermissionCode.manage_permissions
 
 
 def feature_enabled() -> bool:
@@ -27,16 +22,14 @@ def feature_enabled() -> bool:
 
 
 def selectable_roles(db: Session) -> list[models.Role]:
-    """Допустимые роли: все шаблоны, кроме СА, виртуальной и с manage_permissions."""
-    roles = db.execute(
-        select(models.Role)
-        .where(
-            models.Role.is_virtual_all_users.is_(False),
-            models.Role.name.notin_(FORBIDDEN_ROLE_NAMES),
-        )
-        .order_by(models.Role.created_at)
-    ).scalars().all()
-    return [r for r in roles if not any(p.permission == _PRIV_MANAGE for p in r.permissions)]
+    """Допустимые роли: все шаблоны, кроме виртуальной (СА — тоже можно, стенд)."""
+    return list(
+        db.execute(
+            select(models.Role)
+            .where(models.Role.is_virtual_all_users.is_(False))
+            .order_by(models.Role.created_at)
+        ).scalars().all()
+    )
 
 
 def get_offer(db: Session, user: models.User) -> dict:
@@ -107,12 +100,7 @@ def choose_role(db: Session, user: models.User, role_id: str) -> dict:
     role = db.execute(
         select(models.Role).where(models.Role.id == rid)
     ).scalar_one_or_none()
-    if (
-        role is None
-        or role.is_virtual_all_users
-        or role.name in FORBIDDEN_ROLE_NAMES
-        or any(p.permission == _PRIV_MANAGE for p in role.permissions)
-    ):
+    if role is None or role.is_virtual_all_users:
         raise DomainError(
             status=400,
             code="VALIDATION_ERROR",

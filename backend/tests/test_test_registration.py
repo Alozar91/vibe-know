@@ -25,11 +25,11 @@ def feature_off(monkeypatch):
 
 
 def selectable(client):
-    """Роли, которые оффер предлагает на выбор (без СА/виртуальной)."""
+    """Роли, которые оффер предлагает на выбор (без виртуальной; СА — можно)."""
     return [
         x
         for x in client.get("/api/v1/roles").json()
-        if not x["is_virtual_all_users"] and x["name"] != "Системный администратор"
+        if not x["is_virtual_all_users"]
     ]
 
 
@@ -56,7 +56,8 @@ def test_offer_lists_seed_roles(feature_on, client):
     assert body["enabled"] is True
     assert body["available"] is True
     names = [x["name"] for x in body["roles"]]
-    assert names == ["Читатель", "Автор", "Рецензент", "Публикатор"]
+    # СА предлагается наравне с остальными (стенд: пользователь сам себе СА)
+    assert names == ["Читатель", "Автор", "Рецензент", "Публикатор", "Системный администратор"]
 
 
 def test_choose_role_success(feature_on, client, db):
@@ -90,11 +91,30 @@ def test_choose_role_twice_conflict(feature_on, client):
 
 def test_choose_role_forbidden_roles(feature_on, client):
     roles = client.get("/api/v1/roles").json()
-    sa = next(x for x in roles if x["name"] == "Системный администратор")
     virtual = next(x for x in roles if x["is_virtual_all_users"])
-    for role in (sa, virtual):
-        r = client.post("/api/v1/me/test-registration", json={"role_id": role["id"]})
-        assert r.status_code == 400
+    r = client.post("/api/v1/me/test-registration", json={"role_id": virtual["id"]})
+    assert r.status_code == 400
+
+
+def test_choose_role_superuser(feature_on, client, db):
+    """Выбор «Системный администратор» — is_super после /me (FR-104)."""
+    from sqlalchemy import select
+
+    from app.db import models
+
+    sa = next(x for x in selectable(client) if x["name"] == "Системный администратор")
+    me_id = client.get("/api/v1/me").json()["id"]
+    r = client.post("/api/v1/me/test-registration", json={"role_id": sa["id"]})
+    assert r.status_code == 200
+    assert r.json() == {"user_id": me_id, "role": "Системный администратор"}
+    link = db.execute(
+        select(models.Role.name)
+        .join(models.UserRole, models.UserRole.role_id == models.Role.id)
+        .where(models.UserRole.user_id == __import__("uuid").UUID(me_id))
+    ).scalars().all()
+    assert link == ["Системный администратор"]
+    me = client.get("/api/v1/me").json()
+    assert me["is_super"] is True
 
 
 def test_choose_role_unknown(feature_on, client):

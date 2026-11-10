@@ -268,6 +268,8 @@ services:
       dockerfile: deploy/nginx/Dockerfile
       args:
         KB_PUBLIC_URL: ${KB_PUBLIC_URL:-}
+        # База приложения (подпуть): /know/ → приложение на merch-vibe.ru/know
+        VITE_APP_BASE: ${VITE_APP_BASE:-}
     container_name: kb-nginx
     logging: *default-logging
     depends_on:

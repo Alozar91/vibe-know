@@ -421,6 +421,49 @@ textarea { resize: vertical; }
   padding: 34px 32px;
 }
 .login .mark { margin: 0 auto 14px; }
+.login-links { margin-top: 14px; }
+.login-links a { font-size: 12.5px; color: var(--selfg); text-decoration: none; }
+.login-links a:hover { text-decoration: underline; }
+
+/* ===== 15.1 Тестовая регистрация: выбор роли (НЕ для продуктива) ===== */
+.rolepick {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: var(--bg);
+}
+.rolepick .box {
+  width: 380px; max-width: 90vw; text-align: center;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow);
+  padding: 34px 32px;
+}
+.rolepick .box.wide { width: 640px; }
+.rolepick .mark { margin: 0 auto 14px; }
+.rolepick h2 { margin: 0 0 6px; }
+.rolepick .note { margin: 0 auto 16px; max-width: 52ch; }
+.rp-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px; margin: 0 0 14px;
+}
+.rp-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  text-align: left; cursor: pointer;
+  background: var(--panel); color: var(--fg);
+  border: 1px solid var(--line-strong); border-radius: var(--radius);
+  padding: 14px 16px; font: inherit;
+  transition: border-color .12s, box-shadow .12s, background .12s;
+}
+.rp-card:hover:not(:disabled) {
+  border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring);
+}
+.rp-card:disabled { opacity: .6; cursor: wait; }
+.rp-name { font-weight: 700; font-size: 14px; }
+.rp-desc { font-size: 12.5px; color: var(--muted); min-height: 2.6em; }
+.rp-go { font-size: 12.5px; font-weight: 600; color: var(--selfg); }
+.rp-later { margin-bottom: 10px; }
+.rp-escape {
+  display: block; font-size: 12.5px; color: var(--selfg); text-decoration: none;
+}
+.rp-escape:hover { text-decoration: underline; }
 
 /* ===== 16. Прочее ===== */
 .permbox { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 12px; }

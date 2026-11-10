@@ -1,7 +1,7 @@
 {
   "realm": "kb",
   "enabled": true,
-  "registrationAllowed": false,
+  "registrationAllowed": true,
   "loginWithEmailAllowed": true,
   "resetPasswordAllowed": true,
   "rememberMe": false,

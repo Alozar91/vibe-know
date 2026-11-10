@@ -3,7 +3,7 @@
 // карточка материала (US-037/031), снапшоты прав (US-044, СА).
 // modern-ui: каркас шапка+сайдбар, темы light/dark (переключатель в шапке).
 import { useEffect, useState } from 'react'
-import { completeLogin, getAccessToken, isAuthenticated, login, logout, api } from './auth'
+import { completeLogin, getAccessToken, isAuthenticated, login, logout, api, register } from './auth'
 import MaterialsBrowser from './MaterialsBrowser'
 import MaterialCardView from './MaterialCard'
 import Sections from './Sections'
@@ -20,6 +20,13 @@ import { applyTheme, loadTheme, type Theme } from './theme'
 import './styles.css'
 
 type View = { kind: 'browser' } | { kind: 'sections' } | { kind: 'matrix' } | { kind: 'search'; q: string } | { kind: 'analytics' } | { kind: 'material'; id: string } | { kind: 'triggers' } | { kind: 'audit' } | { kind: 'settings' } | { kind: 'service' }
+
+// Оффер тестовой регистрации (НЕ для продуктива): состояние + допустимые роли
+interface TestOffer {
+  enabled: boolean
+  available: boolean
+  roles: { id: string; name: string }[]
+}
 
 const NAV = [
   { kind: 'browser', label: 'Материалы', icon: '📦', superOnly: false },
@@ -39,12 +46,105 @@ function initials(name?: string): string {
   return parts.slice(0, 2).map((x) => x[0]?.toUpperCase() ?? '').join('')
 }
 
+// Экран выбора роли тестовой регистрации (одноразовый, после первого входа).
+// Показывается, только когда флаг включён и ролей у пользователя ещё нет.
+function RolePicker({ onDone }: { onDone: (dismiss?: boolean) => void }) {
+  const [offer, setOffer] = useState<TestOffer | null>(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState('')
+
+  useEffect(() => {
+    api<TestOffer>('/me/test-registration')
+      .then(setOffer)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+  }, [])
+
+  async function choose(roleId: string) {
+    setError('')
+    setBusy(roleId)
+    try {
+      await api('/me/test-registration', { method: 'POST', body: JSON.stringify({ role_id: roleId }) })
+      onDone()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy('')
+    }
+  }
+
+  if (error) {
+    return (
+      <div className="rolepick">
+        <div className="box">
+          <div className="logo mark">БЗ</div>
+          <h2>Не удалось загрузить выбор роли</h2>
+          <p className="note">{error}</p>
+          <button className="btn primary" onClick={() => onDone(true)}>Продолжить без выбора</button>
+        </div>
+      </div>
+    )
+  }
+  if (!offer) {
+    return <div className="rolepick"><div className="box"><p className="spin">Загрузка…</p></div></div>
+  }
+  if (!offer.available) {
+    return (
+      <div className="rolepick">
+        <div className="box">
+          <div className="logo mark">БЗ</div>
+          <h2>Роль уже назначена</h2>
+          <p className="note">Выбор роли доступен один раз; смену роли выполняет системный администратор.</p>
+          <button className="btn primary" onClick={() => onDone(true)}>Продолжить</button>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="rolepick">
+      <div className="box wide">
+        <div className="logo mark">БЗ</div>
+        <h2>Выберите роль для тестирования</h2>
+        <p className="note">
+          Тестовый режим: роль определяет права в системе. Выбор одноразовый —
+          потом роль может поменять только системный администратор.
+        </p>
+        {error && <div className="alert err">{error}</div>}
+        <div className="rp-grid">
+          {offer.roles.map((r) => (
+            <button
+              key={r.id}
+              className="rp-card"
+              disabled={!!busy}
+              onClick={() => choose(r.id)}
+            >
+              <div className="rp-name">{r.name}</div>
+              <div className="rp-desc">{ROLE_HINTS[r.name] ?? 'Просмотр материалов'}</div>
+              <div className="rp-go">{busy === r.id ? 'Назначение…' : 'Выбрать →'}</div>
+            </button>
+          ))}
+        </div>
+        <button className="btn ghost small rp-later" onClick={() => onDone(true)}>Пока не выбирать</button>
+        <a className="rp-escape" href="" onClick={(e) => { e.preventDefault(); register().catch(console.error) }}>
+          Зарегистрировать нового пользователя (тест)
+        </a>
+      </div>
+    </div>
+  )
+}
+
+// Подсказки по ролям (сид LLD §2.6; для клонов — общий текст)
+const ROLE_HINTS: Record<string, string> = {
+  'Читатель': 'Просмотр опубликованных материалов',
+  'Автор': 'Создание и редактирование своих материалов',
+  'Рецензент': 'Проверка материалов на проверке',
+  'Публикатор': 'Публикация и архивация материалов',
+}
+
 export default function App() {
   const [ready, setReady] = useState(false)
   const [authed, setAuthed] = useState(false)
   const [view, setView] = useState<View>({ kind: 'browser' })
   const [refreshToken, setRefreshToken] = useState(0)
-  const [me, setMe] = useState<{ display_name?: string; is_super?: boolean } | null>(null)
+  const [me, setMe] = useState<{ display_name?: string; is_super?: boolean; roles?: string[] } | null>(null)
   const [searchQ, setSearchQ] = useState('')
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const unread = useUnreadCount()
@@ -70,10 +170,20 @@ export default function App() {
 
   useEffect(() => {
     if (!authed) return
-    api<{ display_name: string; is_super?: boolean }>('/me')
+    api<{ display_name: string; is_super?: boolean; roles?: string[] }>('/me')
       .then(setMe)
       .catch(() => setAuthed(false))
   }, [authed, refreshToken])
+
+  // Перезагрузить /me после закрытия экрана тестовой регистрации.
+  // «Пока не выбирать» запоминается на сессию вкладки: без роли пользователь
+  // видит систему в объёме default deny (§3.2), выбор можно продолжить позже.
+  function afterRoleChoice(dismiss = false) {
+    if (dismiss) sessionStorage.setItem('kb-rolepick-dismissed', '1')
+    setMe(null)
+    setAuthed(false)
+    setTimeout(() => setAuthed(isAuthenticated()), 0)
+  }
 
   if (!ready) {
     return (
@@ -91,9 +201,21 @@ export default function App() {
           <h2>Корпоративная база знаний</h2>
           <p className="note">Вход выполняется через Keycloak (Authorization Code + PKCE).</p>
           <button className="btn primary" onClick={() => login().catch(console.error)}>Войти</button>
+          <div className="login-links">
+            <a href="" onClick={(e) => { e.preventDefault(); register().catch(console.error) }}>
+              Зарегистрироваться (тест)
+            </a>
+          </div>
         </div>
       </div>
     )
+  }
+
+  // Тестовая регистрация (НЕ для продуктива): пока у пользователя нет ролей,
+  // показываем одноразовый экран выбора роли (флаг проверит GET-оффер).
+  // «Пока не выбирать» гасит экран до конца сессии вкладки (sessionStorage)
+  if (me && !me.is_super && (me.roles ?? []).length === 0 && !sessionStorage.getItem('kb-rolepick-dismissed')) {
+    return <RolePicker onDone={afterRoleChoice} />
   }
 
   return (
@@ -125,7 +247,7 @@ export default function App() {
             <div className="name">
               {me?.display_name ?? '…'} {me?.is_super && <span className="sa-badge">СА</span>}
             </div>
-            <div className="role">{me?.is_super ? 'Системный администратор' : 'Пользователь'}</div>
+            <div className="role">{me?.is_super ? 'Системный администратор' : (me?.roles ?? [])[0] ?? 'Пользователь'}</div>
           </div>
         </div>
         <button className="btn ghost small" onClick={() => logout()}>Выйти</button>

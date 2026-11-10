@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # CORS/dev
     frontend_url: str = "http://localhost"
 
+    # Тестовая регистрация с выбором роли (НЕ для продуктива): по умолчанию выключена.
+    test_registration: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

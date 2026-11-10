@@ -3,6 +3,9 @@
 import os
 
 os.environ.setdefault("KB_DATABASE_URL", "sqlite:///:memory:")
+# MCP-маунт в create_app выключен: тесты монтируют собственный сервер
+# с фейковым верификатором (test_mcp.py)
+os.environ.setdefault("KB_MCP_ENABLED", "0")
 
 import pytest
 from fastapi.testclient import TestClient

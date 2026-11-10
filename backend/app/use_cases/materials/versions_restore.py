@@ -173,6 +173,11 @@ def restore_version(
 
     update_search_vector(db, m)
 
+    # Пост-MVP [7]: RAG-хук (§5) — pending при восстановлении версии
+    from app.rag.indexing import flush_rag_enqueue, hook_after_change
+
+    hook_after_change(db, m)
+
     # Этап 9: восстановление файла/текста мастера — «мастер изменён»
     # по критерию (US-042 ш.5, FR-038, 16.1-111)
     from app.use_cases.materials.update_material import (
@@ -187,4 +192,7 @@ def restore_version(
         publish_event(db, "master_changed", m.id, user.user_id)
 
     db.commit()
+    from app.rag.indexing import flush_rag_enqueue
+
+    flush_rag_enqueue(db)  # RAG: постановка после коммита (§5)
     return {"id": str(m.id), "version": m.version, "restored_from": number}

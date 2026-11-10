@@ -206,6 +206,11 @@ def update_material(
 
         update_search_vector(db, m)
 
+        # Пост-MVP [7]: RAG-хук (§5) — pending при изменении контента/версии
+        from app.rag.indexing import flush_rag_enqueue, hook_after_change
+
+        hook_after_change(db, m)
+
         # Этап 9: событие «мастер изменён» (LLD §8.1, FR-038, 16.1-111) —
         # по критерию master_change_criterion ('content' | 'any')
         if _is_master_with_children(db, m):
@@ -216,6 +221,9 @@ def update_material(
                 publish_event(db, "master_changed", m.id, user.user_id)
 
     db.commit()
+    from app.rag.indexing import flush_rag_enqueue
+
+    flush_rag_enqueue(db)  # RAG: постановка после коммита (§5)
     return {"id": str(m.id), "version": m.version}
 
 

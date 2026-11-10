@@ -24,6 +24,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, new_uuid
 from app.db.tsvector import TSVector
+from app.db.vector import Vector
 
 
 class User(TimestampMixin, Base):
@@ -394,6 +395,14 @@ class Material(TimestampMixin, Base):
     # Этап 8 (LLD §7.1): FTS-конфигурация и вектор (не generated — динамическая конфигурация)
     search_lang: Mapped[str] = mapped_column(String(20), nullable=False, server_default="russian")
     search_tsv: Mapped[str | None] = mapped_column(TSVector, nullable=True)
+    # Пост-MVP шаг [7] (RAG_DESIGN §2): состояние конвейера индексации
+    # (none/pending/indexed/error; по образцу file_objects §6.4 LLD)
+    rag_state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="none", server_default="none"
+    )
+    rag_stale: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     version: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -915,4 +924,72 @@ class ServiceTask(Base):
     __table_args__ = (
         # Служебный раздел СА: открытые задачи (US-004 ш.4)
         Index("ix_service_tasks_state", "state", "created_at"),
+    )
+
+
+# ==========================================================================
+# RAG: векторная индексация (пост-MVP шаг [7], CONCEPT 10.4; RAG_DESIGN.md)
+# ==========================================================================
+
+
+class RagGroupConfig(TimestampMixin, Base):
+    """rag_group_configs — конфигурация чанкования группы (RAG_DESIGN §2, §3).
+
+    Явная строка = настройка группы; подгруппы без своей строки наследуют
+    ближайшего предка (разрешение по materialized path, §3.2). enabled=false —
+    поддерево не индексируется. chunker — имя из реестра (§4.1).
+    """
+
+    __tablename__ = "rag_group_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=new_uuid)
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("groups.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    chunker: Mapped[str] = mapped_column(Text, nullable=False)
+    params: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, server_default="{}"
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    updated_by: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+
+    group: Mapped["Group"] = relationship(lazy="selectin")
+
+
+class RagChunk(Base):
+    """rag_chunks — чанк текущей версии материала с вектором (RAG_DESIGN §2).
+
+    Чанки принадлежат версии: реиндексация версии удаляет прежние. content_hash —
+    сверка актуальности без переэмбеддинга (reconcile, §5). meta — заголовки,
+    смещения, язык (заполняет чанкер).
+    """
+
+    __tablename__ = "rag_chunks"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=new_uuid)
+    material_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("materials.id", ondelete="CASCADE"), nullable=False
+    )
+    version_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("material_versions.id", ondelete="CASCADE"), nullable=False
+    )
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("groups.id"), nullable=False
+    )  # денормализация группы материала — фильтр поддерева без JOIN groups
+    ord: Mapped[int] = mapped_column(Integer, nullable=False)
+    chunker: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(Text, nullable=False)  # sha256(content)
+    meta: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, server_default="{}"
+    )
+    embedding: Mapped[list | None] = mapped_column(Vector(), nullable=True)  # NULL до эмбеддинга
+    embedding_model: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("uq_rag_chunks_version_ord", "version_id", "ord", unique=True),
+        Index("ix_rag_chunks_material", "material_id"),
+        Index("ix_rag_chunks_group", "group_id"),
     )

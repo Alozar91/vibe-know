@@ -12,6 +12,7 @@ from app.api.v1 import (
     me,
     notifications,
     permissions,
+    rag,
     roles,
     search,
     tags,
@@ -43,5 +44,6 @@ api_router.include_router(search.router)
 api_router.include_router(notifications.router)
 api_router.include_router(notifications.router_triggers)
 api_router.include_router(admin.router)
+api_router.include_router(rag.router)
 
 # Дальше: этап 11 (НФТ/приёмка).

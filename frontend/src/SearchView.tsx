@@ -3,7 +3,8 @@
 // Открытие материала из выдачи → POST /search-opens (§7.6, fire-and-forget).
 import { useCallback, useEffect, useState } from 'react'
 import { api } from './auth'
-import { STATUS_RU, fmtDate, type Material, type Page } from './types'
+import { fmtDate, type Material, type Page } from './types'
+import { Empty, Err, Pager, StatusBadge, STATUS_RU } from './ui'
 
 interface GroupHit { id: string; name: string; path: string }
 interface SearchPage extends Page<Material> {
@@ -94,99 +95,105 @@ export default function SearchView({ onOpenMaterial, initialQuery }: Props) {
 
   return (
     <div>
-      <h2>Поиск</h2>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-        <input value={q} onChange={(e) => setQ(e.target.value)}
-               placeholder="Поисковый запрос (фраза — в кавычках, FR-113)"
-               style={{ width: 420 }}
-               onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); run() } }} />
-        <button onClick={() => { setPage(1); run() }} disabled={busy}>Найти</button>
-        <label>
-          <input type="checkbox" checked={partial}
-                 onChange={(e) => { setPartial(e.target.checked); setPage(1) }} />
-          {' '}Частичное совпадение (FR-114)
-        </label>
-      </div>
-      <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-        <label>Статус:
-          <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1) }}>
-            <option value="">любой</option>
-            {Object.entries(STATUS_RU).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
-          </select>
-        </label>
-        <label>Архив:
-          <input type="checkbox" checked={includeArchive}
-                 onChange={(e) => { setIncludeArchive(e.target.checked); setPage(1) }} />
-        </label>
-        <label>Связи:
-          <select value={masterFilter} onChange={(e) => { setMasterFilter(e.target.value); setPage(1) }}>
-            <option value="">все</option>
-            <option value="masters">только мастер-материалы</option>
-            <option value="children">только подчинённые</option>
-          </select>
-        </label>
-        <label>Сортировка:
-          <select value={sort} onChange={(e) => { setSort(e.target.value); setPage(1) }}>
-            <option value="relevance">релевантность</option>
-            <option value="name">название</option>
-            <option value="updated_at">дата изменения</option>
-            <option value="published_at">дата публикации</option>
-          </select>
-        </label>
-        <button onClick={() => setOrder(order === 'asc' ? 'desc' : 'asc')}>
-          {order === 'asc' ? '↑' : '↓'}
-        </button>
+      <div className="pagehead"><h2>Поиск</h2></div>
+      <div className="panel">
+        <div className="toolbar">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Поисковый запрос (фраза — в кавычках, FR-113)"
+            style={{ width: 420, maxWidth: '100%' }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); run() } }}
+          />
+          <button className="btn primary" onClick={() => { setPage(1); run() }} disabled={busy}>Найти</button>
+          <label className="checkrow">
+            <input type="checkbox" checked={partial}
+                   onChange={(e) => { setPartial(e.target.checked); setPage(1) }} />
+            Частичное совпадение (FR-114)
+          </label>
+          <span className="spacer" />
+          {busy && <span className="meta">Поиск…</span>}
+        </div>
+        <div className="toolbar">
+          <label className="srchfld">Статус:
+            <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1) }}>
+              <option value="">любой</option>
+              {Object.entries(STATUS_RU).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+            </select>
+          </label>
+          <label className="srchfld">Архив:
+            <input type="checkbox" checked={includeArchive}
+                   onChange={(e) => { setIncludeArchive(e.target.checked); setPage(1) }} />
+          </label>
+          <label className="srchfld">Связи:
+            <select value={masterFilter} onChange={(e) => { setMasterFilter(e.target.value); setPage(1) }}>
+              <option value="">все</option>
+              <option value="masters">только мастер-материалы</option>
+              <option value="children">только подчинённые</option>
+            </select>
+          </label>
+          <label className="srchfld">Сортировка:
+            <select value={sort} onChange={(e) => { setSort(e.target.value); setPage(1) }}>
+              <option value="relevance">релевантность</option>
+              <option value="name">название</option>
+              <option value="updated_at">дата изменения</option>
+              <option value="published_at">дата публикации</option>
+            </select>
+          </label>
+          <button className="pg" onClick={() => setOrder(order === 'asc' ? 'desc' : 'asc')}>
+            {order === 'asc' ? '↑' : '↓'}
+          </button>
+        </div>
       </div>
 
-      {error && <p style={{ color: '#b00' }}>{error}</p>}
+      <Err>{error}</Err>
 
       {data && (
         <>
-          <p style={{ color: '#555' }}>
-            Найдено: {data.total}
+          <p className="note">
+            Найдено: <b>{data.total}</b>
             {data.query && <> · запрос: «{data.query}»</>}
           </p>
 
           {data.groups.length > 0 && (
-            <div style={{ border: '1px solid #ccc', borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
-              <strong>Группы</strong>
-              <ul style={{ margin: '6px 0 0' }}>
+            <div className="panel" style={{ marginBottom: 14 }}>
+              <div className="toolbar"><strong style={{ fontSize: 13 }}>Группы</strong></div>
+              <ul className="grouphits">
                 {data.groups.map((g) => (
-                  <li key={g.id}>{g.name} <small style={{ color: '#777' }}>{g.path}</small></li>
+                  <li key={g.id}>{g.name} <small className="mono">{g.path}</small></li>
                 ))}
               </ul>
             </div>
           )}
 
-          <ul style={{ listStyle: 'none', padding: 0 }}>
-            {data.items.map((m) => (
-              <li key={m.id} style={{ padding: '8px 0', borderBottom: '1px solid #eee' }}>
-                <a href="#" onClick={(e) => { e.preventDefault(); openMaterial(m.id) }}
-                   style={{ fontWeight: 'bold' }}>
-                  {highlight(m.name)}
-                </a>{' '}
-                <small>
-                  <span style={badgeStyle}>{STATUS_RU[m.status] ?? m.status}</span>
-                  {' · '}{fmtDate(m.updated_at)}
-                </small>
-                {m.headline && (
-                  <div style={{ fontSize: 12, color: '#555' }}
-                       dangerouslySetInnerHTML={{ __html: m.headline }} />
-                )}
-              </li>
-            ))}
-          </ul>
-          {data.items.length === 0 && <p style={{ color: '#777' }}>Ничего не найдено</p>}
+          <div className="panel">
+            <ul className="hits">
+              {data.items.map((m) => (
+                <li key={m.id} className="searchhit">
+                  <a href="#" onClick={(e) => { e.preventDefault(); openMaterial(m.id) }}>
+                    {highlight(m.name)}
+                  </a>{' '}
+                  <StatusBadge status={m.status} />{' '}
+                  <small className="mono">{fmtDate(m.updated_at)}</small>
+                  {m.headline && (
+                    <div className="hltext" dangerouslySetInnerHTML={{ __html: m.headline }} />
+                  )}
+                </li>
+              ))}
+            </ul>
+            {data.items.length === 0 && <Empty>Ничего не найдено</Empty>}
 
-          <div style={{ marginTop: 12 }}>
-            <button disabled={!canPrev} onClick={() => setPage(page - 1)}>← Назад</button>{' '}
-            <span>Стр. {page} из {pages}</span>{' '}
-            <button disabled={!canNext} onClick={() => setPage(page + 1)}>Вперёд →</button>
+            {pages > 1 && (
+              <Pager
+                page={page}
+                pages={pages}
+                onPrev={() => canPrev && setPage(page - 1)}
+                onNext={() => canNext && setPage(page + 1)}
+              />
+            )}
           </div>
         </>
       )}
     </div>
   )
 }
-
-const badgeStyle: React.CSSProperties = { padding: '1px 6px', borderRadius: 4, background: '#eee' }

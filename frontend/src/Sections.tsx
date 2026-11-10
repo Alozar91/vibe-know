@@ -1,7 +1,8 @@
-// Разделы «Мои материалы», «На проверке», «Архив» (US-006, FR-123–125).
+// Разделы «Мои материалы», «На проверке», «Архив» (US-006, FR-123-125).
 import { useEffect, useState } from 'react'
 import { api } from './auth'
-import { STATUS_RU, fmtDate, type Material, type Page } from './types'
+import { fmtDate, type Material, type Page } from './types'
+import { Empty, Err, Pager, StatusBadge } from './ui'
 
 interface Props {
   onOpenMaterial: (id: string) => void
@@ -19,67 +20,55 @@ export default function Sections({ onOpenMaterial, refreshToken }: Props) {
   const [items, setItems] = useState<Material[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
+  const [error, setError] = useState('')
   const PER_PAGE = 50
 
   useEffect(() => {
     api<Page<Material>>(`/materials?section=${section}&page=${page}&per_page=${PER_PAGE}`)
-      .then((p) => {
-        setItems(p.items)
-        setTotal(p.total)
-      })
-      .catch(() => {
-        setItems([])
-        setTotal(0)
-      })
+      .then((p) => { setItems(p.items); setTotal(p.total); setError('') })
+      .catch((e) => setError(e.detail ?? String(e)))
   }, [section, page, refreshToken])
+
+  const pages = Math.max(1, Math.ceil(total / PER_PAGE))
+  const activeLabel = SECTIONS.find((s) => s.key === section)?.label ?? 'Разделы'
 
   return (
     <div>
-      <h2>Разделы</h2>
-      <p>
+      <div className="pagehead">
+        <h2>Разделы</h2>
+        {total > 0 && <span className="total-pill">{total}</span>}
+      </div>
+      <div className="chiprow">
         {SECTIONS.map((s) => (
           <button
             key={s.key}
+            className={`chip ${section === s.key ? 'on' : ''}`}
             onClick={() => { setSection(s.key); setPage(1) }}
-            style={{
-              marginRight: 8,
-              fontWeight: section === s.key ? 'bold' : 'normal',
-              borderBottom: section === s.key ? '2px solid #333' : 'none',
-            }}
           >
             {s.label}
           </button>
         ))}
-      </p>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr>
-            <th style={th}>Название</th>
-            <th style={th}>Статус</th>
-            <th style={th}>Изменён</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((m) => (
-            <tr key={m.id} onClick={() => onOpenMaterial(m.id)} style={{ cursor: 'pointer' }}>
-              <td style={td}>{m.name}</td>
-              <td style={td}>{STATUS_RU[m.status]}</td>
-              <td style={td}>{fmtDate(m.updated_at)}</td>
-            </tr>
-          ))}
-          {items.length === 0 && <tr><td style={td} colSpan={3}>Пусто</td></tr>}
-        </tbody>
-      </table>
-      {total > PER_PAGE && (
-        <p>
-          <button disabled={page <= 1} onClick={() => setPage(page - 1)}>←</button>{' '}
-          Страница {page}{' '}
-          <button disabled={page >= Math.ceil(total / PER_PAGE)} onClick={() => setPage(page + 1)}>→</button>
-        </p>
-      )}
+      </div>
+      <Err>{error}</Err>
+      <div className="panel">
+        <div className="toolbar"><span className="meta">{activeLabel}</span></div>
+        <table className="tbl">
+          <thead>
+            <tr><th>Название</th><th>Статус</th><th>Изменён</th></tr>
+          </thead>
+          <tbody>
+            {items.map((m) => (
+              <tr key={m.id} className="rowlink" onClick={() => onOpenMaterial(m.id)}>
+                <td className="mname">{m.name}</td>
+                <td><StatusBadge status={m.status} /></td>
+                <td className="nowrap">{fmtDate(m.updated_at)}</td>
+              </tr>
+            ))}
+            {items.length === 0 && <tr><td colSpan={3}><Empty>Пусто</Empty></td></tr>}
+          </tbody>
+        </table>
+        {pages > 1 && <Pager page={page} pages={pages} onPrev={() => setPage(page - 1)} onNext={() => setPage(page + 1)} />}
+      </div>
     </div>
   )
 }
-
-const th: React.CSSProperties = { textAlign: 'left', borderBottom: '2px solid #ccc', padding: 6 }
-const td: React.CSSProperties = { borderBottom: '1px solid #eee', padding: 6 }

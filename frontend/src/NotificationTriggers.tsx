@@ -2,6 +2,7 @@
 // Матрица «триггер → типы получателей»; изменение фиксируется в аудите (FR-140).
 import { useCallback, useEffect, useState } from 'react'
 import { api } from './auth'
+import { Err, Ok } from './ui'
 
 const EVENT_TITLES: Record<string, string> = {
   material_sent_to_review: 'Материал отправлен на проверку',
@@ -74,47 +75,48 @@ export default function NotificationTriggers() {
 
   return (
     <section>
-      <h2>Настройка уведомлений</h2>
-      <p style={{ color: '#555' }}>
+      <div className="pagehead"><h2>Настройка уведомлений</h2></div>
+      <p className="note">
         Модель «триггер → типы получателей» (US-047). Общий триггер «изменение статуса»
         по умолчанию отключён (FR-134); специализированные триггеры имеют приоритет.
       </p>
-      {error && <p style={{ color: '#c00' }}>{error}</p>}
-      {savedMsg && <p style={{ color: '#060' }}>{savedMsg}</p>}
-      <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-        <thead>
-          <tr>
-            <th style={th}>Триггер</th>
-            <th style={th}>Получатели</th>
-            <th style={th}>Включён</th>
-            <th style={th}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((t) => (
-            <tr key={t.event_type}>
-              <td style={td}>{EVENT_TITLES[t.event_type] ?? t.event_type}</td>
-              <td style={td}>
-                {t.recipients.length === 0 && <em style={{ color: '#888' }}>нет</em>}
-                <ul style={{ margin: 0, paddingLeft: 16 }}>
-                  {t.recipients.map((r, i) => (
-                    <li key={i}>{recipientText(r)}</li>
-                  ))}
-                </ul>
-              </td>
-              <td style={td}>{t.enabled ? 'да' : 'нет'}</td>
-              <td style={td}>
-                <button onClick={() => toggleEnabled(t)}>
-                  {t.enabled ? 'Отключить' : 'Включить'}
-                </button>
-              </td>
+      <Err>{error}</Err>
+      <Ok>{savedMsg}</Ok>
+      <div className="panel">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Триггер</th>
+              <th>Получатели</th>
+              <th>Включён</th>
+              <th></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((t) => (
+              <tr key={t.event_type}>
+                <td className="mname">{EVENT_TITLES[t.event_type] ?? t.event_type}</td>
+                <td>
+                  {t.recipients.length === 0 && <em className="note">нет</em>}
+                  <ul className="plainlist">
+                    {t.recipients.map((r, i) => (
+                      <li key={i}>{recipientText(r)}</li>
+                    ))}
+                  </ul>
+                </td>
+                <td>
+                  <span className={`chip ${t.enabled ? 'on' : ''}`}>{t.enabled ? 'да' : 'нет'}</span>
+                </td>
+                <td>
+                  <button className="btn small" onClick={() => toggleEnabled(t)}>
+                    {t.enabled ? 'Отключить' : 'Включить'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }
-
-const th: React.CSSProperties = { borderBottom: '2px solid #333', textAlign: 'left', padding: '6px 8px' }
-const td: React.CSSProperties = { borderBottom: '1px solid #ddd', padding: '6px 8px', verticalAlign: 'top' }

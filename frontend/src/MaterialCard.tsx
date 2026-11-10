@@ -3,6 +3,7 @@
 // удаление (FR-090). Этап 5: кнопки переходов по матрице (US-015–021) и
 // журнал статусов (FR-075). Этап 6: загрузка файла (US-007/008), состояние
 // конвейера (US-011/012), скачивание (US-014), версии/diff/restore (US-041/042).
+// modern-ui: двухпанельная карточка (содержание + боковая колонка действий).
 import { useEffect, useState } from 'react'
 import { api, apiDownload, apiUpload, ApiError } from './auth'
 import {
@@ -11,6 +12,7 @@ import {
   type Material, type MaterialCard, type Page,
   type StatusLogEntry, type TransitionInfo, type VersionDiff, type VersionInfo,
 } from './types'
+import { Err, StatusBadge } from './ui'
 
 interface AttrLite {
   id: string
@@ -320,11 +322,10 @@ export default function MaterialCardView({ materialId, onSaved, onClosed, onOpen
     setError('')
     try {
       await api(`/materials/${card.id}/copy`, {
-        method: 'POST', body: JSON.stringify({ group_id: targetGroup }),
+        method: 'POST', body: JSON.stringify({ group_id: targetGroup, name: childName }),
       })
       setDialog(null)
       onSaved()
-      // копия в другой группе — остаёмся в карточке исходника
     } catch (e) {
       setError(e instanceof ApiError ? `${e.title}: ${e.detail ?? ''}` : String(e))
     } finally {
@@ -416,84 +417,323 @@ export default function MaterialCardView({ materialId, onSaved, onClosed, onOpen
     }
   }
 
-  if (error && !card) return <div><p style={{ color: '#b00' }}>{error}</p><button onClick={onClosed}>Закрыть</button></div>
-  if (!card) return <p>Загрузка…</p>
+  if (error && !card) {
+    return (
+      <div>
+        <Err>{error}</Err>
+        <button className="btn ghost" onClick={onClosed}>← К списку</button>
+      </div>
+    )
+  }
+  if (!card) return <div className="spin">Загрузка…</div>
 
   const p = card.permissions ?? {}
 
   return (
     <div>
-      <button onClick={onClosed}>← К списку</button>
-      <h2>
-        {card.name}{' '}
-        <small style={{ color: '#777' }}>{STATUS_RU[card.status]} · версия {card.version}</small>
-      </h2>
-      {error && <p style={{ color: '#b00' }}>{error}</p>}
+      <div className="btnrow">
+        <button className="btn ghost small" onClick={onClosed}>← К списку</button>
+      </div>
 
-      <table style={{ borderCollapse: 'collapse', marginBottom: 16 }}>
-        <tbody>
-          <tr><td style={k}>Тип</td><td>{card.type_name ?? card.type_id}</td></tr>
-          <tr><td style={k}>Автор</td><td>{card.author_id.slice(0, 8)}…</td></tr>
-          <tr><td style={k}>Изменён</td><td>{fmtDate(card.updated_at)}</td></tr>
-          <tr><td style={k}>Опубликован</td><td>{fmtDate(card.published_at)}</td></tr>
-        </tbody>
-      </table>
+      <div className="panel">
+        <div className="cardhead">
+          <StatusBadge status={card.status} />
+          <h2>{card.name}</h2>
+          <div className="sub">{STATUS_RU[card.status]} · версия {card.version}</div>
+        </div>
+        <Err>{error}</Err>
 
-      {/* Этап 7 (FR-126): ссылка на мастера или список подчинённых */}
-      <h3>Мастер / подчинённые</h3>
-      {card.master_id ? (
-        <p>
-          Мастер:{' '}
-          {card.master ? (
-            <a href="#" onClick={(e) => { e.preventDefault(); onOpenCard?.(card.master!.id) }}>
-              {card.master.name}
-            </a>
-          ) : card.master_id}{' '}
-          <small style={{ color: '#777' }}>({STATUS_RU[card.master?.status ?? card.status]})</small>
-          {p.edit && card.status !== 'archived' && (
-            <button onClick={detachMaster} style={{ marginLeft: 12 }}>Отвязать от мастера</button>
-          )}
-        </p>
-      ) : (
-        <p style={{ color: '#777' }}>Самостоятельный материал (мастера нет)</p>
-      )}
-      {card.children.length > 0 && (
-        <table style={{ borderCollapse: 'collapse', marginBottom: 8 }}>
-          <tbody>
-            {card.children.map((ch) => (
-              <tr key={ch.id}>
-                <td>
-                  <a href="#" onClick={(e) => { e.preventDefault(); onOpenCard?.(ch.id) }}>{ch.name}</a>
-                </td>
-                <td style={{ paddingLeft: 12, color: '#777' }}>{STATUS_RU[ch.status]}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {card.children.length === 0 && !card.master_id && (
-        <p style={{ color: '#777' }}>Подчинённых нет</p>
-      )}
-      {p.create && (
-        <p>
-          <button onClick={openChildDialog}>Создать подчинённый материал</button>
-        </p>
-      )}
-      {p.copy && (
-        <button onClick={openCopyDialog} style={{ marginRight: 8 }}>Копировать</button>
-      )}
-      {p.move && card.children.length === 0 && card.status !== 'archived' && (
-        <button onClick={openMoveDialog} style={{ marginRight: 8 }}>Переместить</button>
-      )}
-      {p.edit && card.master_id && card.status !== 'archived' && (
-        <button onClick={openMasterDialog}>Сменить мастера</button>
-      )}
+        <div className="cardgrid">
+          <div className="cmain">
+            <table className="kv">
+              <tbody>
+                <tr><td className="k">Тип</td><td>{card.type_name ?? card.type_id}</td></tr>
+                <tr><td className="k">Автор</td><td className="mono">{card.author_id.slice(0, 8)}…</td></tr>
+                <tr><td className="k">Изменён</td><td>{fmtDate(card.updated_at)}</td></tr>
+                <tr><td className="k">Опубликован</td><td>{fmtDate(card.published_at)}</td></tr>
+              </tbody>
+            </table>
+
+            {/* Этап 7 (FR-126): ссылка на мастера или список подчинённых */}
+            <div className="fld">
+              <label>Мастер / подчинённые</label>
+              {card.master_id ? (
+                <div>
+                  Мастер:{' '}
+                  {card.master ? (
+                    <a href="#" onClick={(e) => { e.preventDefault(); onOpenCard?.(card.master!.id) }}>
+                      {card.master.name}
+                    </a>
+                  ) : card.master_id}{' '}
+                  <small className="note">({STATUS_RU[card.master?.status ?? card.status]})</small>
+                  {p.edit && card.status !== 'archived' && (
+                    <button className="btn small" onClick={detachMaster} style={{ marginLeft: 12 }}>Отвязать от мастера</button>
+                  )}
+                </div>
+              ) : (
+                <span className="note">Самостоятельный материал (мастера нет)</span>
+              )}
+              {card.children.length > 0 && (
+                <ul className="children-list">
+                  {card.children.map((ch) => (
+                    <li key={ch.id}>
+                      <a href="#" onClick={(e) => { e.preventDefault(); onOpenCard?.(ch.id) }}>{ch.name}</a>{' '}
+                      <small className="note">{STATUS_RU[ch.status]}</small>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {card.children.length === 0 && !card.master_id && (
+                <span className="note">Подчинённых нет</span>
+              )}
+            </div>
+
+            {p.edit ? (
+              editing ? (
+                <div>
+                  <label className="field">
+                    <span className="lbl">Название</span>
+                    <input value={name} onChange={(e) => setName(e.target.value)} />
+                  </label>
+                  <label className="field">
+                    <span className="lbl">Текст (Markdown)</span>
+                    <textarea value={text} onChange={(e) => setText(e.target.value)} rows={10} />
+                  </label>
+                  <div className="btnrow">
+                    <button className="btn primary" onClick={save} disabled={saving}>{saving ? 'Сохранение…' : 'Сохранить'}</button>
+                    <button className="btn ghost" onClick={() => { setEditing(false); setName(card.name); setText(card.text_content ?? '') }}>
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="btnrow">
+                  <button className="btn primary" onClick={() => setEditing(true)}>Редактировать</button>
+                  {p.delete && (card.status === 'draft' || card.status === 'in_review') && (
+                    <button className="btn danger" onClick={remove}>Удалить</button>
+                  )}
+                </div>
+              )
+            ) : (
+              <p className="note">Редактирование недоступно (нет права «Редактирование»)</p>
+            )}
+
+            {/* Содержание */}
+            {!editing && card.text_content && (
+              <div className="fld">
+                <label>Содержание</label>
+                <div className="content-text">{card.text_content}</div>
+              </div>
+            )}
+
+            {/* Атрибуты */}
+            <div className="fld">
+              <label>Атрибуты</label>
+              {card.attributes.length === 0 ? (
+                <span className="note">Не заполнены</span>
+              ) : (
+                <table className="kv">
+                  <tbody>
+                    {card.attributes.map((a) => (
+                      <tr key={a.attribute_id}>
+                        <td className="k">
+                          {a.name}
+                          {a.is_required && <span className="req"> *</span>}
+                          {a.readonly && <small className="note"> (только чтение)</small>}
+                        </td>
+                        <td>{a.values.join(', ') || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Этап 7: комментарии (US-038, FR-096–098) */}
+            <div className="fld">
+              <label>Комментарии</label>
+              {comments.length === 0 && <span className="note">Комментариев нет</span>}
+              <ul className="comment-list">
+                {comments.map((c) => (
+                  <li key={c.id}>
+                    <small className="mono">{fmtDate(c.created_at)}</small>
+                    <span className="mono">{c.author_id.slice(0, 8)}…</span>
+                    <span style={{ whiteSpace: 'pre-wrap' }}>{c.text}</span>
+                  </li>
+                ))}
+              </ul>
+              {/* FR-098: добавляют участники процесса (автор + edit/review/publish);
+                  право create в карте — не участника; проверка — на сервере */}
+              {(p.edit || p.review || p.publish || card.status === 'draft') && (
+                <div className="btnrow">
+                  <textarea
+                    value={commentText} onChange={(e) => setCommentText(e.target.value)}
+                    placeholder="Добавить комментарий…" rows={2} style={{ flex: 1, minWidth: 240 }}
+                  />
+                  <button className="btn small" onClick={addComment} disabled={!commentText.trim()}>Отправить</button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ============ Боковая колонка: действия, файл, версии ============ */}
+          <div className="cside">
+            {/* Этап 5: действия жизненного цикла по матрице (US-015–021) */}
+            <div className="fld">
+              <label>Действия жизненного цикла</label>
+              {transitions.length === 0 && (
+                <span className="note">Нет доступных переходов из статуса «{STATUS_RU[card.status]}»</span>
+              )}
+              <div className="btnrow">
+                {transitions.map((t) => (
+                  <button
+                    key={t.id}
+                    className={`btn small ${t.allowed ? 'primary' : 'ghost'}`}
+                    onClick={() => doTransition(t)}
+                    disabled={!t.allowed}
+                    title={t.allowed ? 'Права перехода: ' + t.permissions.map((x) => RUS[x] ?? x).join(', ') : 'Нет права на этот переход'}
+                  >
+                    → {STATUS_RU[t.to_status]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Действия этапа 7 */}
+            <div className="fld">
+              <label>Связи и копирование</label>
+              <div className="btnrow">
+                {p.create && <button className="btn small" onClick={openChildDialog}>Подчинённый</button>}
+                {p.copy && <button className="btn small" onClick={openCopyDialog}>Копировать</button>}
+                {p.move && card.children.length === 0 && card.status !== 'archived' && (
+                  <button className="btn small" onClick={openMoveDialog}>Переместить</button>
+                )}
+                {p.edit && card.master_id && card.status !== 'archived' && (
+                  <button className="btn small" onClick={openMasterDialog}>Сменить мастера</button>
+                )}
+              </div>
+            </div>
+
+            {/* Этап 6: файл, конвейер (US-011/012/013), скачивание (US-014) */}
+            <div className="fld">
+              <label>Файл</label>
+              {!fileState?.file_id && <span className="note">Файл не загружен</span>}
+              {fileState?.file_id && (
+                <>
+                  <table className="kv">
+                    <tbody>
+                      <tr><td className="k">Имя</td><td>{fileState.filename}</td></tr>
+                      <tr><td className="k">Тип</td><td>{fileState.mime_type} · {Math.round((fileState.size_bytes ?? 0) / 1024)} КБ</td></tr>
+                      <tr><td className="k">Антивирус</td><td>{fileState.scan_state && SCAN_RU[fileState.scan_state]}</td></tr>
+                      <tr><td className="k">PDF</td><td>{fileState.pdf_state && PDF_RU[fileState.pdf_state]}</td></tr>
+                    </tbody>
+                  </table>
+                  <div className="btnrow">
+                    {fileState.scan_state === 'ready' && p.download && (
+                      <button className="btn small" onClick={() => download('file')}>Скачать файл</button>
+                    )}
+                    {fileState.pdf_state === 'ready_pdf' && (
+                      <button className="btn small" onClick={() => download('pdf')}>PDF</button>
+                    )}
+                    {p.download && card.text_content && (
+                      <button className="btn small" onClick={() => download('text.md')}>Текст .md</button>
+                    )}
+                  </div>
+                  {fileState.scan_state !== 'ready' && (
+                    <div className="alert warn">Файл недоступен до завершения проверки (US-011)</div>
+                  )}
+                </>
+              )}
+              {p.edit && card.status !== 'archived' && (
+                <div className="btnrow">
+                  <input
+                    type="file" disabled={busy}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadFile(f); e.target.value = '' }}
+                  />
+                  {busy && <small className="note"> Загрузка…</small>}
+                </div>
+              )}
+              {card.text_out_of_sync && (
+                <div className="alert warn">Текстовое представление не синхронизировано с файлом (FR-030)</div>
+              )}
+            </div>
+
+            {/* Этап 6: версии (US-041/042, FR-145–148) */}
+            <div className="fld">
+              <label>Версии</label>
+              {versions.length === 0 && <span className="note">Версий ещё нет</span>}
+              <ul className="version-list">
+                {versions.map((v) => (
+                  <li key={v.number}>
+                    <span className="mono">v{v.number}</span>
+                    <span className="mono">{fmtDate(v.created_at)}</span>
+                    <button className="btn small" onClick={() => showDiff(v.number)}>diff</button>
+                    {p.edit && card.status !== 'archived' && (
+                      <button className="btn small" onClick={() => restore(v.number)}>Восстановить</button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {diff && (
+                <div className="diffbox">
+                  <b>Сравнение версии {diff.number} с предыдущей</b>
+                  {diff.file_changed && <div className="alert warn">Файл изменён в этой версии</div>}
+                  {diff.metadata_changes.length > 0 && (
+                    <table className="kv">
+                      <tbody>
+                        {diff.metadata_changes.map((c, i) => (
+                          <tr key={i}>
+                            <td className="k">{c.field}</td>
+                            <td className="old" style={{ paddingRight: 12 }}>{c.old || '—'}</td>
+                            <td className="new">{c.new || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  {diff.text_diff.length > 0 && <pre>{diff.text_diff.join('\n')}</pre>}
+                  {!diff.file_changed && diff.metadata_changes.length === 0 && diff.text_diff.length === 0 && (
+                    <div className="note">Различий нет</div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Этап 5: журнал статусов (FR-075) */}
+            <div className="fld">
+              <label>История статусов</label>
+              {log.length === 0 && <span className="note">Переходов ещё не было</span>}
+              <ul className="pipeline">
+                {log.map((e, i) => (
+                  <li key={i}>
+                    <span className="when">{fmtDate(e.created_at)}</span>
+                    <span>
+                      {e.from_status ? `${STATUS_RU[e.from_status]} → ` : ''}
+                      {STATUS_RU[e.to_status]}
+                    </span>
+                    <span className="note">{e.user_display_name}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Права пользователя (FR-129) */}
+            <div className="fld">
+              <label>Права (ваш доступ)</label>
+              <span className="note">
+                {Object.entries(p).filter(([, v]) => v).map(([k2]) => RUS[k2] ?? k2).join(', ') || 'только просмотр'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Диалог этапа 7: создание подчинённого (US-024/025) */}
       {dialog === 'child' && (
-        <div style={dialogBox}>
+        <div className="dialog">
           <h4>Создать подчинённый материал</h4>
-          <label>Вид<br />
+          <label className="field">
+            <span className="lbl">Вид</span>
             <select value={childKind} onChange={(e) => {
               const kind = e.target.value as 'adaptation' | 'translation'
               setChildKind(kind)
@@ -502,317 +742,107 @@ export default function MaterialCardView({ materialId, onSaved, onClosed, onOpen
               <option value="adaptation">Адаптация</option>
               <option value="translation">Перевод</option>
             </select>
-          </label><br /><br />
+          </label>
           {childKind === 'translation' && (
-            <>
-              <label>Язык перевода (обязателен — US-025 A1)<br />
-                <select value={childLang} onChange={(e) => setChildLang(e.target.value)}>
-                  <option value="">— выберите язык —</option>
-                  {langOptions.map((v) => (
-                    <option key={v.id} value={v.id}>{v.value}</option>
-                  ))}
-                </select>
-              </label>{langOptions.length === 0 && (
-                <small style={{ color: '#b00' }}> Справочник «Язык» не заведён (СА: атрибуты → справочники)</small>
-              )}<br /><br />
-            </>
+            <label className="field">
+              <span className="lbl">Язык перевода (обязателен — US-025 A1)</span>
+              <select value={childLang} onChange={(e) => setChildLang(e.target.value)}>
+                <option value="">— выберите язык —</option>
+                {langOptions.map((v) => (
+                  <option key={v.id} value={v.id}>{v.value}</option>
+                ))}
+              </select>
+              {langOptions.length === 0 && <div className="alert err"> Справочник «Язык» не заведён (СА: атрибуты → справочники)</div>}
+            </label>
           )}
-          <label>Имя (по умолчанию — FR-035)<br />
-            <input value={childName} onChange={(e) => setChildName(e.target.value)} style={{ width: 320 }} />
-          </label><br /><br />
-          <label>Целевая группа<br />
+          <label className="field">
+            <span className="lbl">Имя (по умолчанию — FR-035)</span>
+            <input value={childName} onChange={(e) => setChildName(e.target.value)} />
+          </label>
+          <label className="field">
+            <span className="lbl">Целевая группа</span>
             <select value={targetGroup} onChange={(e) => setTargetGroup(e.target.value)}>
               <option value="">— выберите группу —</option>
               {flatGroups(groups).map(({ g, depth }) => (
-                <option key={g.id} value={g.id}>{'  '.repeat(depth)}{g.name}</option>
+                <option key={g.id} value={g.id}>{'  '.repeat(depth)}{g.name}</option>
               ))}
             </select>
-          </label><br /><br />
-          <button onClick={createChild} disabled={busy || !targetGroup || (childKind === 'translation' && !childLang.trim())}>
-            Создать
-          </button>{' '}
-          <button onClick={() => setDialog(null)}>Отмена</button>
+          </label>
+          <div className="btnrow">
+            <button className="btn primary" onClick={createChild} disabled={busy || !targetGroup || (childKind === 'translation' && !childLang.trim())}>
+              Создать
+            </button>
+            <button className="btn ghost" onClick={() => setDialog(null)}>Отмена</button>
+          </div>
         </div>
       )}
 
       {/* Диалог: копирование (US-028) */}
       {dialog === 'copy' && (
-        <div style={dialogBox}>
+        <div className="dialog">
           <h4>Копировать материал</h4>
-          <p style={{ color: '#777' }}>Имя копии: {childName} (счётчик при конфликте — FR-092)</p>
-          <label>Целевая группа<br />
+          <p className="note">Имя копии: {childName} (счётчик при конфликте — FR-092)</p>
+          <label className="field">
+            <span className="lbl">Целевая группа</span>
             <select value={targetGroup} onChange={(e) => setTargetGroup(e.target.value)}>
               <option value="">— выберите группу —</option>
               {flatGroups(groups).map(({ g, depth }) => (
-                <option key={g.id} value={g.id}>{'  '.repeat(depth)}{g.name}</option>
+                <option key={g.id} value={g.id}>{'  '.repeat(depth)}{g.name}</option>
               ))}
             </select>
-          </label><br /><br />
-          <button onClick={doCopy} disabled={busy || !targetGroup}>Копировать</button>{' '}
-          <button onClick={() => setDialog(null)}>Отмена</button>
+          </label>
+          <div className="btnrow">
+            <button className="btn primary" onClick={doCopy} disabled={busy || !targetGroup}>Копировать</button>
+            <button className="btn ghost" onClick={() => setDialog(null)}>Отмена</button>
+          </div>
         </div>
       )}
 
       {/* Диалог: перемещение (US-027) */}
       {dialog === 'move' && (
-        <div style={dialogBox}>
+        <div className="dialog">
           <h4>Переместить материал</h4>
-          <p style={{ color: '#777' }}>
+          <p className="note">
             Требуется право «Перемещение» в обеих группах. При конфликте имени операция будет
-            отклонена — переименуйте материал вручную (FR-037).
+            отклонена — переименуйте материал заранее (FR-037).
           </p>
-          <label>Целевая группа<br />
+          <label className="field">
+            <span className="lbl">Целевая группа</span>
             <select value={targetGroup} onChange={(e) => setTargetGroup(e.target.value)}>
               <option value="">— выберите группу —</option>
               {flatGroups(groups).map(({ g, depth }) => (
-                <option key={g.id} value={g.id}>{'  '.repeat(depth)}{g.name}</option>
+                <option key={g.id} value={g.id}>{'  '.repeat(depth)}{g.name}</option>
               ))}
             </select>
-          </label><br /><br />
-          <button onClick={doMove} disabled={busy || !targetGroup}>Переместить</button>{' '}
-          <button onClick={() => setDialog(null)}>Отмена</button>
+          </label>
+          <div className="btnrow">
+            <button className="btn primary" onClick={doMove} disabled={busy || !targetGroup}>Переместить</button>
+            <button className="btn ghost" onClick={() => setDialog(null)}>Отмена</button>
+          </div>
         </div>
       )}
 
       {/* Диалог: смена мастера (US-026) */}
       {dialog === 'master' && (
-        <div style={dialogBox}>
+        <div className="dialog">
           <h4>Сменить мастера</h4>
-          <p style={{ color: '#777' }}>
-            Новый мастер: «Утверждён»/«Публикация», без собственного мастера (FR-032/036).
-          </p>
-          <label>Поиск материала-мастера<br />
-            <input value={masterName} onChange={(e) => searchMasters(e.target.value)}
-                   placeholder="Начните вводить название" style={{ width: 320 }} />
+          <label className="field">
+            <span className="lbl">Новый мастер (approved/published, FR-036)</span>
+            <input value={masterName} onChange={(e) => searchMasters(e.target.value)} placeholder="Начните вводить название" />
           </label>
-          <ul style={{ listStyle: 'none', padding: 0 }}>
+          <ul className="master-options">
             {masterOptions.map((m) => (
               <li key={m.id}>
-                <button onClick={() => changeMaster(m.id)} disabled={busy}>{m.name}</button>
-                <small style={{ color: '#777', marginLeft: 8 }}> {STATUS_RU[m.status]}</small>
+                <button className="btn small" onClick={() => changeMaster(m.id)} disabled={busy}>{m.name}</button>
+                <small className="note"> {STATUS_RU[m.status]}</small>
               </li>
             ))}
           </ul>
-          <button onClick={() => setDialog(null)}>Отмена</button>
-        </div>
-      )}
-
-      {p.edit ? (
-        editing ? (
-          <div style={{ maxWidth: 640 }}>
-            <label>Название<br />
-              <input value={name} onChange={(e) => setName(e.target.value)} style={{ width: '100%' }} />
-            </label><br /><br />
-            <label>Текст (Markdown)<br />
-              <textarea value={text} onChange={(e) => setText(e.target.value)} rows={10} style={{ width: '100%' }} />
-            </label><br />
-            <button onClick={save} disabled={saving}>{saving ? 'Сохранение…' : 'Сохранить'}</button>{' '}
-            <button onClick={() => { setEditing(false); setName(card.name); setText(card.text_content ?? '') }}>
-              Отмена
-            </button>
-          </div>
-        ) : (
-          <p>
-            <button onClick={() => setEditing(true)}>Редактировать</button>{' '}
-            {p.delete && (card.status === 'draft' || card.status === 'in_review') &&
-              <button onClick={remove} style={{ color: '#b00' }}>Удалить</button>}
-          </p>
-        )
-      ) : (
-        <p style={{ color: '#777' }}>Редактирование недоступно (нет права «Редактирование»)</p>
-      )}
-
-      {/* Этап 6: файл, конвейер (US-011/012/013), скачивание (US-014) */}
-      <h3>Файл</h3>
-      {!fileState?.file_id && <p style={{ color: '#777' }}>Файл не загружен</p>}
-      {fileState?.file_id && (
-        <>
-          <table style={{ borderCollapse: 'collapse', marginBottom: 8 }}>
-            <tbody>
-              <tr><td style={k}>Имя</td><td>{fileState.filename}</td></tr>
-              <tr><td style={k}>Тип</td><td>{fileState.mime_type} · {Math.round((fileState.size_bytes ?? 0) / 1024)} КБ</td></tr>
-              <tr><td style={k}>Антивирус</td><td>{fileState.scan_state && SCAN_RU[fileState.scan_state]}</td></tr>
-              <tr><td style={k}>PDF</td><td>{fileState.pdf_state && PDF_RU[fileState.pdf_state]}</td></tr>
-            </tbody>
-          </table>
-          <p>
-            {fileState.scan_state === 'ready' && p.download && (
-              <button onClick={() => download('file')}>Скачать файл</button>
-            )}
-            {fileState.scan_state !== 'ready' && (
-              <small style={{ color: '#777' }}> Файл недоступен до завершения проверки (US-011)</small>
-            )}
-            {fileState.pdf_state === 'ready_pdf' && (
-              <button onClick={() => download('pdf')} style={{ marginLeft: 8 }}>Скачать PDF (предпросмотр)</button>
-            )}
-            {p.download && card.text_content && (
-              <button onClick={() => download('text.md')} style={{ marginLeft: 8 }}>Скачать текст .md</button>
-            )}
-          </p>
-        </>
-      )}
-      {p.edit && card.status !== 'archived' && (
-        <p>
-          <input
-            type="file" disabled={busy}
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadFile(f); e.target.value = '' }}
-          />
-          {busy && <small> Загрузка…</small>}
-        </p>
-      )}
-      {card.text_out_of_sync && (
-        <p style={{ color: '#a60' }}>Текстовое представление не синхронизировано с файлом (FR-030)</p>
-      )}
-
-      {/* Этап 5: действия жизненного цикла по матрице (US-015–021) */}
-      <h3>Действия</h3>
-      {transitions.length === 0 && <p style={{ color: '#777' }}>Нет доступных переходов из статуса «{STATUS_RU[card.status]}»</p>}
-      <p>
-        {transitions.map((t) => (
-          <span key={t.id} style={{ marginRight: 8 }}>
-            <button
-              onClick={() => doTransition(t)}
-              disabled={!t.allowed}
-              title={t.allowed ? 'Права перехода: ' + t.permissions.map((x) => RUS[x] ?? x).join(', ') : 'Нет права на этот переход'}
-            >
-              → {STATUS_RU[t.to_status]}
-            </button>
-          </span>
-        ))}
-      </p>
-
-      {/* Этап 5: журнал статусов (FR-075) */}
-      <h3>История статусов</h3>
-      {log.length === 0 && <p style={{ color: '#777' }}>Переходов ещё не было</p>}
-      <table style={{ borderCollapse: 'collapse' }}>
-        <tbody>
-          {log.map((e, i) => (
-            <tr key={i}>
-              <td style={k}>{fmtDate(e.created_at)}</td>
-              <td>
-                {e.from_status ? `${STATUS_RU[e.from_status]} → ` : ''}
-                {STATUS_RU[e.to_status]}
-              </td>
-              <td style={{ paddingLeft: 12 }}>{e.user_display_name}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      {/* Этап 6: версии (US-041/042, FR-145–148) */}
-      <h3>Версии</h3>
-      {versions.length === 0 && <p style={{ color: '#777' }}>Версий ещё нет</p>}
-      {versions.length > 0 && (
-        <table style={{ borderCollapse: 'collapse', marginBottom: 8 }}>
-          <thead>
-            <tr>
-              <th style={k}>№</th><th style={k}>Автор</th><th style={k}>Дата</th><th></th><th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {versions.map((v) => (
-              <tr key={v.number}>
-                <td style={k}>{v.number}</td>
-                <td>{v.author_id.slice(0, 8)}…</td>
-                <td>{fmtDate(v.created_at)}</td>
-                <td style={{ paddingLeft: 8 }}>
-                  <button onClick={() => showDiff(v.number)}>Сравнить с предыдущей</button>
-                </td>
-                <td style={{ paddingLeft: 8 }}>
-                  {p.edit && card.status !== 'archived' && (
-                    <button onClick={() => restore(v.number)}>Восстановить</button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {diff && (
-        <div style={{ background: '#f6f6f6', padding: 8, maxWidth: 720, overflowX: 'auto' }}>
-          <h4>Сравнение версии {diff.number} с предыдущей</h4>
-          {diff.file_changed && <p style={{ color: '#a60' }}>Файл изменён в этой версии</p>}
-          {diff.metadata_changes.length > 0 && (
-            <table style={{ borderCollapse: 'collapse' }}>
-              <tbody>
-                {diff.metadata_changes.map((c, i) => (
-                  <tr key={i}>
-                    <td style={k}>{c.field}</td>
-                    <td style={{ color: '#b00', paddingRight: 12 }}>{c.old || '—'}</td>
-                    <td style={{ color: '#070' }}>{c.new || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {diff.text_diff.length > 0 && (
-            <pre style={{ fontSize: 12 }}>{diff.text_diff.join('\n')}</pre>
-          )}
-          {!diff.file_changed && diff.metadata_changes.length === 0 && diff.text_diff.length === 0 && (
-            <p style={{ color: '#777' }}>Различий нет</p>
-          )}
-        </div>
-      )}
-
-      <h3>Атрибуты</h3>
-      {card.attributes.length === 0 && <p style={{ color: '#777' }}>Не заполнены</p>}
-      <table style={{ borderCollapse: 'collapse' }}>
-        <tbody>
-          {card.attributes.map((a) => (
-            <tr key={a.attribute_id}>
-              <td style={k}>
-                {a.name}
-                {a.is_required && <span style={{ color: '#b00' }}> *</span>}
-                {a.readonly && <small style={{ color: '#777' }}> (только чтение)</small>}
-              </td>
-              <td>{a.values.join(', ') || '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <h3>Права (ваш доступ)</h3>
-      <p style={{ color: '#777' }}>
-        {Object.entries(p).filter(([, v]) => v).map(([k2]) => RUS[k2] ?? k2).join(', ') || 'только просмотр'}
-      </p>
-
-      {/* Этап 7: комментарии (US-038, FR-096–098) */}
-      <h3>Комментарии</h3>
-      {comments.length === 0 && <p style={{ color: '#777' }}>Комментариев нет</p>}
-      <table style={{ borderCollapse: 'collapse', marginBottom: 8 }}>
-        <tbody>
-          {comments.map((c) => (
-            <tr key={c.id}>
-              <td style={k}>{fmtDate(c.created_at)}</td>
-              <td style={k}>{c.author_id.slice(0, 8)}…</td>
-              <td style={{ whiteSpace: 'pre-wrap' }}>{c.text}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {/* FR-098: добавляют участники процесса (автор + edit/review/publish);
-          право create в карте — не участника; проверка — на сервере */}
-      {(p.edit || p.review || p.publish || card.status === 'draft') && (
-        <div>
-          <textarea
-            value={commentText} onChange={(e) => setCommentText(e.target.value)}
-            rows={2} style={{ width: 480 }} placeholder="Новый комментарий…"
-          /><br />
-          <button onClick={addComment} disabled={!commentText.trim() || busy}>Добавить</button>
-          <small style={{ color: '#777', marginLeft: 8 }}>
-            Комментарии не редактируются и не удаляются (FR-096)
-          </small>
+          <button className="btn ghost" onClick={() => setDialog(null)}>Отмена</button>
         </div>
       )}
     </div>
   )
-}
-
-const k: React.CSSProperties = { color: '#666', paddingRight: 16, verticalAlign: 'top', whiteSpace: 'nowrap' }
-
-const dialogBox: React.CSSProperties = {
-  border: '1px solid #ccc', borderRadius: 4, padding: '8px 16px',
-  maxWidth: 560, margin: '12px 0', background: '#fafafa',
 }
 
 const RUS: Record<string, string> = {

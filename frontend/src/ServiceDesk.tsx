@@ -3,6 +3,7 @@
 // (FR-012, US-004 ш.5: закрытие только после передачи права) + /tasks (NFR-014).
 import { useCallback, useEffect, useState } from 'react'
 import { api } from './auth'
+import { Empty, Err, Ok } from './ui'
 
 interface DeletedMaterial {
   id: string
@@ -88,131 +89,136 @@ export default function ServiceDesk() {
 
   return (
     <section>
-      <h2>Служебный раздел</h2>
-      {error && <p style={{ color: '#c00' }}>{error}</p>}
-      {msg && <p style={{ color: '#060' }}>{msg}</p>}
+      <div className="pagehead"><h2>Служебный раздел</h2></div>
+      <Err>{error}</Err>
+      <Ok>{msg}</Ok>
 
-      <h3>Удалённые материалы (US-050)</h3>
-      <p style={{ color: '#555', margin: '4px 0 8px' }}>
-        Только просмотр — восстановление не предусмотрено (FR-021, FR-090).
-      </p>
-      {mats.length === 0 && <p>Нет удалённых материалов.</p>}
-      {mats.length > 0 && (
-        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13, marginBottom: 16 }}>
-          <thead>
-            <tr><th style={th}>Название</th><th style={th}>Статус</th><th style={th}>Удалён</th></tr>
-          </thead>
-          <tbody>
-            {mats.map((m) => (
-              <tr key={m.id}>
-                <td style={td}>{m.name}</td>
-                <td style={td}>{m.status}</td>
-                <td style={td}>{fmt(m.deleted_at)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <h3>Удалённые группы</h3>
-      {groups.length === 0 && <p>Нет удалённых групп.</p>}
-      {groups.length > 0 && (
-        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13, marginBottom: 16 }}>
-          <thead>
-            <tr><th style={th}>Название</th><th style={th}>Путь</th><th style={th}>Удалена</th></tr>
-          </thead>
-          <tbody>
-            {groups.map((g) => (
-              <tr key={g.id}>
-                <td style={td}>{g.name}</td>
-                <td style={td}><code>{g.path}</code></td>
-                <td style={td}>{fmt(g.deleted_at)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <h3>Задачи передачи права ревью (FR-012)</h3>
-      <p style={{ color: '#555', margin: '4px 0 8px' }}>
-        Закрытие возможно, только когда право «Ревью (утверждение)» уже назначено
-        другому активному пользователю (US-004 ш.5, US-044).
-      </p>
-      <label style={{ fontSize: 13 }}>
-        <input type="checkbox" checked={showClosed}
-               onChange={(e) => { setShowClosed(e.target.checked); load(e.target.checked) }} />{' '}
-        показывать закрытые
-      </label>
-      {tasks.length === 0 && <p>Нет задач.</p>}
-      {tasks.length > 0 && (
-        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13, marginBottom: 16 }}>
-          <thead>
-            <tr><th style={th}>Тип</th><th style={th}>Данные</th><th style={th}>Состояние</th><th style={th}>Создана</th><th style={th}></th></tr>
-          </thead>
-          <tbody>
-            {tasks.map((t) => (
-              <tr key={t.id}>
-                <td style={td}><code>{t.task_type}</code></td>
-                <td style={{ ...td, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {JSON.stringify(t.payload)}
-                </td>
-                <td style={td}>{t.closed_at ? 'закрыта' : (t.state || 'открыта')}</td>
-                <td style={td}>{fmt(t.created_at)}</td>
-                <td style={td}>
-                  {!t.closed_at && <button onClick={() => closeTask(t)}>Закрыть</button>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <h3>Состояние фоновых задач (NFR-014)</h3>
-      {sysTasks && (
-        <>
-          <table style={{ borderCollapse: 'collapse', fontSize: 13, marginBottom: 8 }}>
+      <div className="panel">
+        <div className="toolbar"><strong style={{ fontSize: 13 }}>Удалённые материалы (US-050)</strong></div>
+        <div className="panel-body">
+          <p className="note" style={{ margin: '0 0 8px' }}>
+            Только просмотр — восстановление не предусмотрено (FR-021, FR-090).
+          </p>
+        </div>
+        {mats.length === 0 && <Empty>Нет удалённых материалов.</Empty>}
+        {mats.length > 0 && (
+          <table className="tbl">
             <thead>
-              <tr><th style={th}>Тип задачи</th><th style={th}>Счётчики по состояниям</th></tr>
+              <tr><th>Название</th><th>Статус</th><th>Удалён</th></tr>
             </thead>
             <tbody>
-              {Object.entries(sysTasks.summary).map(([type, states]) => (
-                <tr key={type}>
-                  <td style={td}><code>{type}</code></td>
-                  <td style={td}>{Object.entries(states).map(([s, c]) => `${s}=${c}`).join(', ')}</td>
+              {mats.map((m) => (
+                <tr key={m.id}>
+                  <td className="mname">{m.name}</td>
+                  <td className="mono">{m.status}</td>
+                  <td className="nowrap">{fmt(m.deleted_at)}</td>
                 </tr>
               ))}
-              {Object.keys(sysTasks.summary).length === 0 && (
-                <tr><td style={td} colSpan={2}>Задач нет.</td></tr>
-              )}
             </tbody>
           </table>
-          <details>
-            <summary style={{ cursor: 'pointer', fontSize: 13 }}>
-              Последние задачи ({sysTasks.items.length})
-            </summary>
-            <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+        )}
+      </div>
+
+      <div className="panel">
+        <div className="toolbar"><strong style={{ fontSize: 13 }}>Удалённые группы</strong></div>
+        {groups.length === 0 && <Empty>Нет удалённых групп.</Empty>}
+        {groups.length > 0 && (
+          <table className="tbl">
+            <thead>
+              <tr><th>Название</th><th>Путь</th><th>Удалена</th></tr>
+            </thead>
+            <tbody>
+              {groups.map((g) => (
+                <tr key={g.id}>
+                  <td className="mname">{g.name}</td>
+                  <td className="mono">{g.path}</td>
+                  <td className="nowrap">{fmt(g.deleted_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="panel">
+        <div className="toolbar"><strong style={{ fontSize: 13 }}>Задачи передачи права ревью (FR-012)</strong></div>
+        <div className="panel-body">
+          <p className="note" style={{ margin: '0 0 8px' }}>
+            Закрытие возможно, только когда право «Ревью (утверждение)» уже назначено
+            другому активному пользователю (US-004 ш.5, US-044).
+          </p>
+          <label className="checkrow">
+            <input type="checkbox" checked={showClosed}
+                   onChange={(e) => { setShowClosed(e.target.checked); load(e.target.checked) }} />
+            показывать закрытые
+          </label>
+        </div>
+        {tasks.length === 0 && <Empty>Нет задач.</Empty>}
+        {tasks.length > 0 && (
+          <table className="tbl">
+            <thead>
+              <tr><th>Тип</th><th>Данные</th><th>Состояние</th><th>Создана</th><th></th></tr>
+            </thead>
+            <tbody>
+              {tasks.map((t) => (
+                <tr key={t.id}>
+                  <td className="mono">{t.task_type}</td>
+                  <td className="wrap-anywhere mono">{JSON.stringify(t.payload)}</td>
+                  <td>{t.closed_at ? 'закрыта' : (t.state || 'открыта')}</td>
+                  <td className="nowrap">{fmt(t.created_at)}</td>
+                  <td>
+                    {!t.closed_at && <button className="btn small" onClick={() => closeTask(t)}>Закрыть</button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="panel">
+        <div className="toolbar"><strong style={{ fontSize: 13 }}>Состояние фоновых задач (NFR-014)</strong></div>
+        {sysTasks && (
+          <>
+            <table className="tbl">
               <thead>
-                <tr><th style={th}>Тип</th><th style={th}>Объект</th><th style={th}>Состояние</th><th style={th}>Попытки</th><th style={th}>Ошибка</th><th style={th}>Завершена</th></tr>
+                <tr><th>Тип задачи</th><th>Счётчики по состояниям</th></tr>
               </thead>
               <tbody>
-                {sysTasks.items.map((t) => (
-                  <tr key={t.id}>
-                    <td style={td}><code>{t.task_type}</code></td>
-                    <td style={td}>{t.object_type ?? '—'}</td>
-                    <td style={td}>{t.state}</td>
-                    <td style={td}>{t.attempts}</td>
-                    <td style={{ ...td, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.last_error ?? ''}</td>
-                    <td style={td}>{fmt(t.finished_at)}</td>
+                {Object.entries(sysTasks.summary).map(([type, states]) => (
+                  <tr key={type}>
+                    <td className="mono">{type}</td>
+                    <td>{Object.entries(states).map(([s, c]) => `${s}=${c}`).join(', ')}</td>
                   </tr>
                 ))}
+                {Object.keys(sysTasks.summary).length === 0 && (
+                  <tr><td colSpan={2}><Empty>Задач нет.</Empty></td></tr>
+                )}
               </tbody>
             </table>
-          </details>
-        </>
-      )}
+            <details className="summary-box">
+              <summary>Последние задачи ({sysTasks.items.length})</summary>
+              <table className="tbl">
+                <thead>
+                  <tr><th>Тип</th><th>Объект</th><th>Состояние</th><th>Попытки</th><th>Ошибка</th><th>Завершена</th></tr>
+                </thead>
+                <tbody>
+                  {sysTasks.items.map((t) => (
+                    <tr key={t.id}>
+                      <td className="mono">{t.task_type}</td>
+                      <td>{t.object_type ?? '—'}</td>
+                      <td>{t.state}</td>
+                      <td>{t.attempts}</td>
+                      <td className="wrap-anywhere mono">{t.last_error ?? ''}</td>
+                      <td className="nowrap">{fmt(t.finished_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          </>
+        )}
+      </div>
     </section>
   )
 }
-
-const th: React.CSSProperties = { borderBottom: '2px solid #333', textAlign: 'left', padding: '4px 8px' }
-const td: React.CSSProperties = { borderBottom: '1px solid #ddd', padding: '4px 8px', verticalAlign: 'top' }

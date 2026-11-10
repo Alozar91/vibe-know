@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react'
 import { api, ApiError } from './auth'
 import { STATUS_RU, type Material } from './types'
+import { Err, Ok } from './ui'
 
 type Rule = {
   id: string
@@ -110,81 +111,84 @@ export default function TransitionMatrix() {
 
   return (
     <div>
-      <h2>Матрица переходов</h2>
-      <p style={{ color: '#777' }}>
+      <div className="pagehead"><h2>Матрица переходов</h2></div>
+      <p className="note">
         Право проверяется на материале с учётом наследования от групп; достаточно любого из
         назначенных (FR-070). Переход без прав недоступен никому, кроме СА (FR-072).
         Защищённые переходы (в «Публикация» — только из «Утверждён»; в «Архив» — из любого
         статуса) нельзя удалить (FR-073).
       </p>
-      {error && <p style={{ color: '#b00' }}>{error}</p>}
-      {msg && <p style={{ color: '#060' }}>{msg}</p>}
+      <Err>{error}</Err>
+      <Ok>{msg}</Ok>
 
-      <table style={{ borderCollapse: 'collapse', marginBottom: 20 }}>
-        <thead>
-          <tr>
-            <th style={th}>Из статуса</th>
-            <th style={th}>В статус</th>
-            <th style={th}>Права перехода</th>
-            <th style={th}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rules.map((r) => (
-            <tr key={r.id}>
-              <td style={td}>{r.from_status ? STATUS_RU[r.from_status] : '* (любой)'}</td>
-              <td style={td}>{STATUS_RU[r.to_status]}</td>
-              <td style={td}>
-                {PERMISSIONS.map((p) => (
-                  <label key={p} style={{ marginRight: 10, whiteSpace: 'nowrap' }}>
-                    <input
-                      type="checkbox"
-                      checked={r.permissions.includes(p)}
-                      onChange={() => savePerms(r, p)}
-                    />{' '}
-                    {PERM_RU[p]}
-                  </label>
-                ))}
-              </td>
-              <td style={td}>
-                {r.is_protected ? (
-                  <small style={{ color: '#777' }}>защищён</small>
-                ) : (
-                  <button onClick={() => removeRule(r)} style={{ color: '#b00' }}>Удалить</button>
-                )}
-              </td>
+      <div className="panel">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Из статуса</th>
+              <th>В статус</th>
+              <th>Права перехода</th>
+              <th></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rules.map((r) => (
+              <tr key={r.id}>
+                <td className="nowrap">{r.from_status ? STATUS_RU[r.from_status] : '* (любой)'}</td>
+                <td className="nowrap">{STATUS_RU[r.to_status]}</td>
+                <td>
+                  {PERMISSIONS.map((p) => (
+                    <label key={p} className="checkrow">
+                      <input
+                        type="checkbox"
+                        checked={r.permissions.includes(p)}
+                        onChange={() => savePerms(r, p)}
+                      />
+                      {PERM_RU[p]}
+                    </label>
+                  ))}
+                </td>
+                <td>
+                  {r.is_protected ? (
+                    <small className="note">защищён</small>
+                  ) : (
+                    <button className="btn danger small" onClick={() => removeRule(r)}>Удалить</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <h3>Добавить правило</h3>
-      <div style={{ marginBottom: 8 }}>
-        <label>Из статуса:{' '}
-          <select value={newFrom} onChange={(e) => setNewFrom(e.target.value)}>
-            <option value="">* (любой, кроме «Архива»)</option>
-            {STATUSES.map((s) => <option key={s} value={s}>{STATUS_RU[s]}</option>)}
-          </select>
-        </label>{' '}
-        <label>В статус:{' '}
-          <select value={newTo} onChange={(e) => setNewTo(e.target.value)}>
-            <option value="">— выберите —</option>
-            {STATUSES.map((s) => <option key={s} value={s}>{STATUS_RU[s]}</option>)}
-          </select>
-        </label>
+      <div className="panel">
+        <div className="panel-body">
+          <div className="btnrow">
+            <label className="srchfld">Из статуса:
+              <select value={newFrom} onChange={(e) => setNewFrom(e.target.value)}>
+                <option value="">* (любой, кроме «Архива»)</option>
+                {STATUSES.map((s) => <option key={s} value={s}>{STATUS_RU[s]}</option>)}
+              </select>
+            </label>
+            <label className="srchfld">В статус:
+              <select value={newTo} onChange={(e) => setNewTo(e.target.value)}>
+                <option value="">— выберите —</option>
+                {STATUSES.map((s) => <option key={s} value={s}>{STATUS_RU[s]}</option>)}
+              </select>
+            </label>
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            {PERMISSIONS.map((p) => (
+              <label key={p} className="checkrow">
+                <input type="checkbox" checked={newPerms.includes(p)} onChange={() => toggleNewPerm(p)} />
+                {PERM_RU[p]}
+              </label>
+            ))}
+          </div>
+          <button className="btn primary" onClick={createRule}>Добавить</button>
+        </div>
       </div>
-      <div style={{ marginBottom: 8 }}>
-        {PERMISSIONS.map((p) => (
-          <label key={p} style={{ marginRight: 10, whiteSpace: 'nowrap' }}>
-            <input type="checkbox" checked={newPerms.includes(p)} onChange={() => toggleNewPerm(p)} />{' '}
-            {PERM_RU[p]}
-          </label>
-        ))}
-      </div>
-      <button onClick={createRule}>Добавить</button>
     </div>
   )
 }
-
-const th: React.CSSProperties = { textAlign: 'left', borderBottom: '2px solid #333', padding: '4px 10px' }
-const td: React.CSSProperties = { borderBottom: '1px solid #ddd', padding: '6px 10px', verticalAlign: 'top' }

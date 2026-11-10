@@ -11,6 +11,7 @@ const REDIRECT_URI = window.location.origin + window.location.pathname
 interface Tokens {
   access_token: string
   refresh_token?: string
+  id_token?: string // для id_token_hint при выходе (OIDC RP-Initiated Logout)
   expires_at: number // monotonic-ish: Date.now() + expires_in*1000
 }
 
@@ -42,11 +43,16 @@ export async function login(): Promise<void> {
 }
 
 function logoutRedirect(): void {
-  const params = new URLSearchParams({
-    post_logout_redirect_uri: REDIRECT_URI,
-    ...(tokens ? {} : {}),
-  })
-  // id_token не хранится — без id_token_hint; выход по сессии Keycloak
+  // OIDC RP-Initiated Logout: при post_logout_redirect_uri Keycloak 26 требует
+  // id_token_hint — иначе ошибка «Missing parameters: id_token_hint».
+  // id_token держится в памяти вместе с access/refresh (не в localStorage).
+  const params = new URLSearchParams()
+  if (tokens?.id_token) {
+    params.set('id_token_hint', tokens.id_token)
+    params.set('post_logout_redirect_uri', REDIRECT_URI)
+  } else {
+    // id_token нет (сессия уже истекла) — выход по SSO-сессии Keycloak без редиректа
+  }
   window.location.href = `${KC_BASE}/protocol/openid-connect/logout?${params}`
 }
 
@@ -82,6 +88,8 @@ function setTokens(j: Record<string, unknown>): void {
   tokens = {
     access_token: j.access_token as string,
     refresh_token: j.refresh_token as string | undefined,
+    // id_token нужен только для выхода (id_token_hint); при refresh — обновляется
+    id_token: (j.id_token as string | undefined) ?? tokens?.id_token,
     expires_at: Date.now() + ((j.expires_in as number) - 30) * 1000, // запас 30 с
   }
   if (tokens!.refresh_token) scheduleRefresh((j.refresh_expires_in as number) ?? 1800)

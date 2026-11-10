@@ -144,6 +144,50 @@ def reindex_group_ep(group_id: uuid.UUID, user: CurrentUserDep,
     return {"group_id": str(group_id), "state": "enqueued"}
 
 
+@router.get("/admin/rag/status")
+def status_ep(user: CurrentUserDep, db=Depends(get_db),
+              limit: int = 50) -> dict:
+    """Статус индексации (§8-4): счётчики по rag_state + проблемные материалы.
+
+    pending — хук поставил, задача не дошла (или брокер молчал);
+    error — исчерпаны ретраи (embedding-провайдер/чанкер); оба списка —
+    рабочие очереди СА. Отставшие поднимет reconcile (beat, §5).
+    """
+    _require(user.is_super)
+    from sqlalchemy import func, select
+
+    from app.db import models
+
+    M = models.Material
+    counts = dict(db.execute(
+        select(M.rag_state, func.count()).where(M.is_deleted.is_(False))
+        .group_by(M.rag_state)
+    ).all())
+
+    limit = min(200, max(1, int(limit)))
+    problems: list[dict] = []
+    rows = db.execute(
+        select(M.id, M.name, M.rag_state, M.rag_stale, M.updated_at)
+        .where(M.is_deleted.is_(False),
+               M.rag_state.in_(["pending", "error"]))
+        .order_by(M.updated_at.desc().nullslast())
+        .limit(limit)
+    ).all()
+    for mid, name, st, stale, upd in rows:
+        problems.append({
+            "id": str(mid), "name": name, "state": st, "stale": stale,
+            "updated_at": upd.isoformat() if upd else None,
+        })
+
+    total_chunks = db.execute(select(func.count()).select_from(models.RagChunk)).scalar_one()
+    return {
+        "counts": counts,  # {none: N, pending: N, indexed: N, error: N}
+        "problems": problems,
+        "total_chunks": total_chunks,
+        "limit": limit,
+    }
+
+
 # ==========================================================================
 # Поиск по чанкам (RAG_DESIGN §7.1-2): POST /rag/retrieve — права §3.2
 # ==========================================================================

@@ -105,7 +105,7 @@ def reindex_material_ep(material_id: uuid.UUID, user: CurrentUserDep,
 
     m = db.execute(select(models.Material).where(models.Material.id == material_id)).scalar_one_or_none()
     if m is None or m.is_deleted:
-        raise DomainError(status=404, code="NOT_FOUND", title="Не найдено",
+        raise DomainError(status=404, code="RESOURCE_NOT_FOUND", title="Не найдено",
                           detail="Материал не найден")
     from app.rag.indexing import hook_after_change
 
@@ -127,7 +127,7 @@ def reindex_group_ep(group_id: uuid.UUID, user: CurrentUserDep,
 
     g = db.get(models.Group, group_id)
     if g is None or g.is_deleted:
-        raise DomainError(status=404, code="NOT_FOUND", title="Не найдено",
+        raise DomainError(status=404, code="RESOURCE_NOT_FOUND", title="Не найдено",
                           detail="Группа не найдена")
     try:
         from app.worker.tasks import rag_reindex_group_subtree

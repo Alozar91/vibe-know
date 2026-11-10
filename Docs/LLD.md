@@ -1,11 +1,12 @@
 # Детальное проектирование (LLD) корпоративной базы знаний
 
-> **Версия:** 0.5 · **Дата:** 09.11.2026 · **Статус:** актуальная редакция (принята; раунд 5 — замечания реализации этапа 11)
+> **Версия:** 0.6 · **Дата:** 10.11.2026 · **Статус:** актуальная редакция (принята; раунд 6 — пост-MVP шаг [7] «RAG и ИИ-агенты», ветка `rag`)
 
 ## История изменений
 
 | Версия | Дата | Изменения |
 |---|---|---|
+| 0.6 | 10.11.2026 | Пост-MVP шаг [7] «RAG и ИИ-агенты» (CONCEPT 16.1-120; ветка `rag`, RAG_DESIGN.md — не нормативный источник механики): §2.2 дополнен таблицами `rag_group_configs` (конфиг чанкования группы, наследование по ближайшему предку), `rag_chunks` (pgvector, HNSW) и колонками `materials.rag_state`/`rag_stale`; §2.5 — ключи `rag.enabled`/`rag.default_chunker`/`rag.default_params`; §9 — задачи `rag.index_material` (ретраи 3), `rag.reindex_group_subtree`, `rag.reconcile` (beat, ежечасно); §7 дополнен §7.7 «Векторный и гибридный поиск» (эмбеддинги OpenAI-совместимого API, RRF-слияние, дедуп 1 чанк/материал, k ≤ 20); §12.2 — новые коды RAG_* / QUEUE_UNAVAILABLE, судьба `NOT_IMPLEMENTED` (search_type реализован — код не используется); §12.3 — RAG-эндпоинты СА-контура, `POST /rag/retrieve`, реализация всех трёх типов `/search`, `/api/v1/mcp` (MCP read-only); §13 — трассировка дополнена; Приложение А — раунд 6 (№39–41) |
 | 0.5 | 09.11.2026 | Раунд 5 (реализация MVP, этап 11 «НФТ и приёмка»; Приложение А, №33–38): §9 дополнен реализацией метрик (kb_queue_* worker-экспозер :9808, kb_api_* middleware api, окно 24 ч, нормализация маршрутов, 15 правил алертинга, blackbox-пробы) и механикой бэкап-контура (NFR-012: tools-образ postgres:18.6+pgBackRest+restic, WAL-архив RPO ≤ 1 ч, stanza kb = БД kb+keycloak, restic-снапшоты silo с согласованием по времени, маркеры + textfile-свежесть, алерты BackupStale/BackupFailed); №35 — fail-closed интроспекции приведён к §10 (active=false → 401, был KeyError 500); №36–38 — поисковые оптимизации по итогам НТ (NFR-001): фильтр partial на `name % q` + SET LOCAL порога (№36), раскладка предиката/ранжирования по distinct search_lang с константным конфигом + батч-подсветка ts_headline (№37), fastupdate=off (миграция 0010), COUNT без ORDER BY, plan_cache_mode=force_custom_plan, требование лексического разнообразия нагрузочного корпуса (№38); процедуры восстановления — deploy/README.md. Контракты §12 без изменений |
 | 0.4 | 09.11.2026 | Раунд 4 (реализация MVP, этап 10 «СА-контур»): §11 — полный перечень кодов действий аудита по факту реализации (type/attribute/dictionary/tag/role/user.*, snapshot.update, user.role_revoke/deactivate) и охват `audit_log` всех админ-use-cases (FR-140); §10 — сверка `keycloak.sync` реактивирует (`enabled=true` → `is_deactivated=false`), пагинация страницами по `KEYCLOAK_SYNC_PAGE`; deploy-требование Admin API Keycloak ≥26.8 (scope `kc-admin-api` + роль `view-users` сервисному аккаунту). Контракты §12 без изменений; синхронные правки других документов не требуются (замечания — механика реализации, не поведение) |
 | 0.3 | 09.11.2026 | Раунд 3 (реализация MVP, этапы 7–8; Приложение А, №30–32): частичное совпадение — ILIKE по подстроке как основной механизм [уточнение LLD к §7.3] (trgm-`%` не находит подстроку в длинном названии, FR-114); явный каст `search_lang::regconfig` в запросах/ранжировании/подсветке (§7.3/§7.4 — PG не приводит varchar неявно); точки вставки пересчёта search_tsv в сервисных мутациях (§7.1). Контракты §12 без изменений; синхронные правки других документов не требуются (замечания — механика реализации, не поведение) |
@@ -15,7 +16,7 @@
 ## 1. Назначение документа и связь с проектом
 
 - Документ выполняет шаг [4] плана (CONCEPT.md, раздел 17): детальное проектирование — конкретная модель данных (таблицы, поля, связи), контракты API, механизм проверки прав, механизм версионирования, поисковый индекс.
-- Входные документы: CONCEPT.md (ред. 2.17), REQUIREMENTS.md (ред. 1.6), SCENARIOS.md (ред. 0.9), HLD.md (ред. 1.1). LLD не переопределяет правила концепции и решения HLD, а детализирует их до уровня, достаточного для реализации (шаг [5]).
+- Входные документы: CONCEPT.md (ред. 2.19), REQUIREMENTS.md (ред. 1.7), SCENARIOS.md (ред. 0.10), HLD.md (ред. 1.1), RAG_DESIGN.md (не нормативный, реализация пост-MVP шага [7]). LLD не переопределяет правила концепции и решения HLD, а детализирует их до уровня, достаточного для реализации (шаг [5]).
 - Ссылки: (4.1) — разделы концепции; (FR-xxx), (NFR-xxx) — требования; (US-xxx) — сценарии; (16.1-xx) — решения концепции; (HLD, §N) — разделы высокоуровневой архитектуры.
 - Решения уровня HLD (стек, состав контейнеров, принципы подсистем) не пересматриваются; уточнения внутрисистемной механики HLD помечаются «[уточнение LLD]» с указанием раздела HLD.
 - Охват — только MVP; пост-MVP — только как закладываемые структуры (реестр — 15.3).
@@ -133,6 +134,8 @@
 | text_content | text NULL | Markdown — канонический формат (16.1-4) |
 | text_out_of_sync | boolean DEFAULT false | признак рассинхронизации с файлом (FR-030) |
 | version | int NOT NULL DEFAULT 1 | оптимистичная блокировка + ETag (FR-093–095) |
+| rag_state | text NOT NULL DEFAULT 'none' | состояние RAG-конвейера (16.1-120, §7.7): `none` — вне поддерева/конвейер off; `pending` — хук поставил, задача не выполнялась; `indexed` — чанки актуальны; `error` — ретраи исчерпаны (чинит `rag.reconcile`, §9) |
+| rag_stale | boolean DEFAULT false | текст/версия изменились после индексации (§7.7); индекс `ix_materials_rag_stale` |
 | published_at, archived_at, created_at, updated_at | timestamptz | |
 | is_deleted, deleted_at | boolean, timestamptz | soft-delete (FR-090) |
 
@@ -206,6 +209,20 @@ UNIQUE (from_status, to_status) — одна строка на переход; `
 
 **search_events / search_opens / search_analytics** (9.9, FR-127) — §7.6.
 
+**rag_group_configs** (16.1-120, RAG-механика §7.7)
+
+| Поле | Тип | Примечание |
+|---|---|---|
+| id | uuid PK | |
+| group_id | uuid FK groups NOT NULL UNIQUE (CASCADE) | одна явная настройка на группу |
+| chunker | text NOT NULL | имя из реестра чанкеров (§7.7; UI — `GET /admin/rag/chunkers`) |
+| params | jsonb NOT NULL DEFAULT '{}' | параметры чанкера; валидация — реестром |
+| enabled | boolean DEFAULT true | false — поддерево исключено из индексации |
+| updated_by | uuid FK users RESTRICT | СА, выполнивший правку |
+| created_at, updated_at | timestamptz | |
+
+**rag_chunks** (16.1-120, RAG-механика §7.7): `id uuid PK`, `material_id FK materials CASCADE`, `version_id FK material_versions CASCADE`, `group_id FK groups` (копия на момент индексации — фильтр поддерева), `ord int` (порядок в версии), `chunker text`, `content text`, `content_hash text` (sha256 — fast-path пропуска неизменённых, §7.7), `meta jsonb` (границы/структура чанкера), `embedding vector(DIM)` (pgvector; DIM — env `KB_RAG_EMBEDDING_DIM`, по умолчанию 1536, фиксируется миграцией — смена модели/размерности = новая миграция + полный переиндекс), `embedding_model text`; UNIQUE (version_id, ord) — чанки прошлых версий не хранятся, замена DELETE+INSERT по материалу одной транзакцией (§7.7). SQLite (тесты) — те же таблицы с TEXT-столбцом; векторные ветки поиска не выполняются.
+
 **system_tasks** (NFR-014; §9): `id uuid PK`, `task_type`, `object_type NULL`, `object_id NULL`, `state task_state`, `attempts int`, `last_error text NULL`, `scheduled_at`, `started_at NULL`, `finished_at NULL`. Источник истины по состояниям задач (HLD, §3.2); брокер — транспорт.
 
 **service_tasks** (FR-012): `id uuid PK`, `task_type service_task_type`, `payload jsonb` (группа, право, деактивированный пользователь), `state task_state`, `created_at`, `closed_at NULL`. Незакрываема, пока право не передано (US-004).
@@ -253,6 +270,8 @@ CREATE UNIQUE INDEX uq_groups_name_among_siblings
 | material_versions | UNIQUE `(material_id, number)` | §5.1 |
 | transition_rules | UNIQUE `(from_status, to_status)`; частичный `WHERE from_status IS NULL OR from_status <> 'archived'` (FR-073) | §2.2 |
 | materials | GIN `search_tsv`; GIN trgm `name`, `text_content` | поиск (§7) |
+| rag_chunks | HNSW `embedding vector_cosine_ops` (m=16, ef_construction=64); B-tree `material_id`, `group_id`; UNIQUE `(version_id, ord)` | векторный поиск (§7.7) |
+| materials | B-tree `rag_stale` | `rag.reconcile` — отставшие индексации (§7.7, §9) |
 | file_objects | UNIQUE `sha256` | дедупликация (NFR-010) |
 | attribute_values | B-tree `(material_id, attribute_id)`; `(attribute_id, value_number)`, `(attribute_id, value_date)` | фильтры по атрибутам (FR-116) |
 | permission_snapshots | B-tree `(object_type, object_id)`, `role_id` | предикат прав (§3) |
@@ -283,6 +302,9 @@ CREATE UNIQUE INDEX uq_groups_name_among_siblings
 | `trgm_similarity_threshold` | 0.3 `[уточнение LLD]` | FR-113, §7.3 |
 | `cas_gc_delay_hours` | 24 `[уточнение LLD]` | §6.5 |
 | `short_query_min_len` | 3 `[уточнение LLD]` | ILIKE-фолбэк коротких запросов, §7.3 |
+| `rag.enabled` | `true` | конвейер индексации включён (§7.7); системный уровень наследования |
+| `rag.default_chunker` | `"recursive"` | чанкер материалов без явной настройки группы (§7.7) |
+| `rag.default_params` | `{}` | параметры чанкера по умолчанию (§7.7) |
 
 Параметры Keycloak (политики паролей, блокировка перебора, TTL access-токена 15 мин, SSO Session Idle 8 ч) — консоль Keycloak, не реестр (US-048).
 
@@ -496,6 +518,17 @@ GIN `search_tsv`; GIN trgm `name`, `text_content` (частичное совпа
 - `search_opens`: `search_event_id`, `material_id`, `created_at` — факт открытия из выдачи (CTR, 3.2); фронтенд отправляет событие открытия при переходе из результатов — `POST /search-opens` (§12.3, fire-and-forget; ошибки приёма не влияют на переход).
 - Свёртка `analytics_rollup` (worker, ежедневно) в `search_analytics` за период: `{period_start, query, hit_count, zero_result_count, open_count}`; доля материалов с текстом — мгновенный агрегат (COUNT по `text_content IS NOT NULL` среди неудалённых). Raw-события — хранение `analytics_raw_retention_days`, затем пакетное удаление. Персональных данных нет (FR-127).
 
+### 7.7. Векторный и гибридный поиск (RAG) (16.1-120, 9.1/9.7/9.8; FR-133)
+
+Пост-MVP шаг [7] (CONCEPT §17), реализован в ветке `rag`; механика источника — RAG_DESIGN.md (не нормативный), контракт здесь.
+
+- **Назначение**: семантический поиск по чанкам текстового представления материалов для ИИ-агентов (RAG — Retrieval-Augmented Generation, 10.4) и пользователей (переключатель типа поиска, 9.4). Эмбеддинги — по OpenAI-совместимому API (`POST {base_url}/v1/embeddings`, env: `KB_RAG_EMBEDDING_BASE_URL`, `KB_RAG_EMBEDDING_API_KEY`, `KB_RAG_EMBEDDING_MODEL` — по умолчанию `text-embedding-3-small`, `KB_RAG_EMBEDDING_DIM` — 1536, `KB_RAG_EMBEDDING_TIMEOUT` — 30 с, `KB_RAG_EMBEDDING_BATCH` — 32). Проверка совместимости провайдера перед включением — `POST /admin/rag/test-connection`; несовпадение размерности ответа с `KB_RAG_EMBEDDING_DIM` — ошибка клиента (§6).
+- **Чанкование** (по образцу 6.5): текст текущей версии (`text_content`; пуст — снапшот версии, FR-144) разбивается чанкером: встроенные `characters`, `recursive` (дефолт), `markdown`, `whole`; сторонние — через entry-points (`kb.rag.chunkers`, реестр с дедупликацией имён). Вид чанкования — настройка уровня **группы** (`rag_group_configs`) с наследованием по ближайшему предку; на системном уровне — ключи `rag.enabled`/`rag.default_chunker`/`rag.default_params` (§2.5). `enabled=false` на любом уровне — поддерево исключено из индексации. Смена конфига группы (вниз по дереву) — переиндексация поддерева `rag.reindex_group_subtree` (§9).
+- **Конвейер индексации** (задача `rag.index_material`, §9; идемпотентна): resolve effective-конфига → чанкование → fast-path (набор `content_hash` чанков версии уже равен пересчитанному — эмбеддинг не нужен, только state) → эмбеддинг пачками (до DELETE/INSERT: сбой провайдера не трогает данные) → замена чанков версии одной транзакцией. Хук точек изменения текста/версии материала (тот же вызов, что FTS-хук §7.1) ставит `rag_state='pending'`, `rag_stale=true`; постановка в брокер — после коммита, сбой брокера не мешает ответу (отставших поднимает `rag.reconcile`, §9). Индексируются **все статусы** (права фильтруют выдачу, 9.3); материал без текста — `indexed`, 0 чанков; вне индексируемого поддерева — чанки удаляются, `state='none'`.
+- **Выдача с правами** (10.4, 9.3): `POST /rag/retrieve` (чанки для RAG-консюмеров) и `GET /search?search_type=vector|hybrid` (материалы для UI) применяют **ровно предикат §3.2** (`visible_materials_condition`) — агент, работающий под УЗ пользователя, видит только то, что видит пользователь. Вектор запроса: конвейер off (нет base_url) → `409 RAG_EMBEDDING_NOT_CONFIGURED`; сбой провайдера → `502 RAG_EMBEDDING_UNAVAILABLE` (§12.2).
+- **Гибрид** (9.1): RRF-слияние (`score = Σ 1/(60 + rank)`, rank с 1 в каждом потоке — константа реализации, §14) векторного ранга чанков и FTS-ранга материалов (§7.4); дедупликация — **один лучший чанк на материал** (для `/rag/retrieve`); лимиты: `k ≤ 20`, длина запроса ≤ 512 символов; вызовы `/rag/retrieve` фиксируются в `search_events` (аналитика §7.6). Векторный/гибридный поиск выполняется только в PostgreSQL (pgvector; SQLite — ветки не запускаются).
+- **Эксплуатация** (СА-контур, §12.3): статус индексации (`GET /admin/rag/status` — счётчики по `rag_state`, проблемные материалы `pending`/`error`, всего чанков), ручная переиндексация материала/поддерева группы, настройка групп (§2.2).
+
 ## 8. Уведомления (11, FR-134–139)
 
 ### 8.1. События и получатели
@@ -528,6 +561,9 @@ GIN `search_tsv`; GIN trgm `name`, `text_content` (частичное совпа
 | `keycloak.sync` | расписание (5 мин) | 3 попытки | полная выгрузка — результат заменяет |
 | `maintenance.integrity_check` | еженедельно | — | сверка инвариантов §2.3 (счётчики ссылок, даты/статусы, осиротевшие ссылки) |
 | `maintenance.fts_rebuild` | еженедельно | — | полная пересборка `search_tsv` (§7.1); пересчёт идемпотентен |
+| `rag.index_material` | хук изменения материала / `rag.reindex_group_subtree` / `rag.reconcile` / ручная переиндексация | 3 попытки | замена чанков DELETE+INSERT одной транзакцией (§7.7); fast-path по `content_hash` |
+| `rag.reindex_group_subtree` | смена конфига группы (вниз по дереву) / ручной запрос СА | — | список id поддерева → постановка `rag.index_material` на каждый |
+| `rag.reconcile` | ежечасно (beat) | — | идемпотентная свёрка: `rag_stale`, материалы с чанками чужой модели, `rag_state='error'` → постановка `rag.index_material` |
 
 - Источник истины по состояниям — `system_tasks` (NFR-014); брокер Valkey — транспорт (HLD §3.2); восстановление после сбоя — задачи в `queued` перезапускаются диспетчером при старте worker (reconcile очереди из БД).
 - Метрики для Prometheus: глубина и возраст очередей (из `system_tasks`), доля ошибок (NFR-019) — экспозер в api `/metrics` и отдельный экспозер worker.
@@ -589,7 +625,9 @@ GIN `search_tsv`; GIN trgm `name`, `text_content` (частичное совпа
 | `ARCHIVED_SOURCE_RULE_FORBIDDEN` | 400 | правило матрицы с `from_status='archived'` (FR-073, §2.6) |
 | `RESOURCE_NOT_FOUND` | 404 | объект не найден или невидим |
 | `FILE_PENDING_SCAN` | 409 | файл ещё проверяется; повторите позже (§6.2) |
-| `NOT_IMPLEMENTED` | 400 | зарезервированное значение параметра вне MVP (`search_type`, §12.3) |
+| `RAG_EMBEDDING_NOT_CONFIGURED` | 409 | конвейер RAG выключен (`KB_RAG_EMBEDDING_BASE_URL` не задан) при запросе векторного/гибридного поиска (§7.7) |
+| `RAG_EMBEDDING_UNAVAILABLE` | 502 | embedding-провайдер недоступен/ответ с ошибкой (§7.7) |
+| `QUEUE_UNAVAILABLE` | 503 | брокер задач недоступен при постановке переиндексации (§7.7); штатно — подхватит `rag.reconcile` |
 | `PRECONDITION_REQUIRED` | 428 | мутация материала без If-Match (FR-095, §12.1) |
 | `VALIDATION_ERROR` | 400 | ошибки схемы запроса; `params.errors[]` |
 
@@ -631,13 +669,21 @@ GIN `search_tsv`; GIN trgm `name`, `text_content` (частичное совпа
 | `GET/POST /materials/{id}/comments` | комментарии | чтение — видимость; создание — участники процесса | FR-096–098 |
 | `GET/PATCH/DELETE /materials/{id}/permissions`, `POST /materials/{id}/permissions:copy-from-role` | снапшоты прав | СА | FR-100, FR-105 |
 | (аналогично для групп) | права групп | СА | FR-100, FR-105 |
-| `GET /search?q=…&search_type=fulltext\|vector\|hybrid` | поиск; MVP — fulltext, прочие значения зарезервированы (400 `NOT_IMPLEMENTED`) | предикат в запросе | FR-133, §7 |
+| `GET /search?q=…&search_type=fulltext\|vector\|hybrid` | поиск; все три типа реализованы: fulltext — §7.3–7.5, vector/hybrid — по чанкам pgvector (§7.7); неизвестное значение — 400 `VALIDATION_ERROR` | предикат в запросе | FR-133, §7.7 |
+| `POST /rag/retrieve` `{query, group_id?, include_subgroups?, k≤20, mode: vector\|hybrid}` | чанки с оценками и `deep_link` для RAG-консюмеров (дедуп — 1 лучший чанк на материал); вызов фиксируется в `search_events` | предикат в запросе (§3.2) | FR-133, §7.7 |
 | `GET /notifications`, `POST /notifications/{id}:read`, `POST /notifications:read-all` | лента, прочтение | получатель | FR-137 |
 | `GET/PUT /notification-triggers` | конфигурация триггеров | СА | FR-134/135 |
 | `GET/POST /transition-rules`, `DELETE /transition-rules/{id}` | CRUD матрицы переходов (is_protected — только чтение); создание правила с `from_status='archived'` → 400 `ARCHIVED_SOURCE_RULE_FORBIDDEN` | СА | FR-070–074 |
 | `GET /audit`, `GET /audit/export` | журнал, выгрузка NDJSON | СА; экспорт фиксируется | FR-140–143 |
 | `GET /analytics/search` | аналитика поиска | СА | FR-127 |
 | `GET/PUT /settings` | реестр параметров | СА | NFR-020, US-048 |
+| `GET /admin/rag/chunkers` | реестр чанкеров (встроенные + entry-points) | СА | FR-133, §7.7 |
+| `GET/PUT/DELETE /admin/rag/groups/{id}/config` | явный + effective конфиг чанкования группы; создать/обновить; снять явную (наследовать) | СА | FR-133, §7.7 |
+| `POST /admin/rag/test-connection` | проверка embedding-провайдера до включения индексации | СА | FR-133, §7.7 |
+| `POST /admin/rag/materials/{id}:reindex` | ручная переиндексация материала | СА | FR-133, §7.7 |
+| `POST /admin/rag/groups/{id}:reindex` | переиндексация поддерева группы; брокер недоступен → 503 `QUEUE_UNAVAILABLE` | СА | FR-133, §7.7 |
+| `GET /admin/rag/status?limit=` | статус индексации: счётчики `rag_state`, проблемные (`pending`/`error`), всего чанков | СА | FR-133, §7.7 |
+| `GET|POST /api/v1/mcp/` | MCP-сервер read-only (streamable HTTP, JSON-ответы, stateless): тулы `kb_search` (поиск по чанкам — те же лимиты, что `POST /rag/retrieve`), `kb_groups` (список групп для фильтра); Bearer-токен Keycloak → introspection (§10) → права как у владельца УЗ (предикат §3.2); выключается `KB_MCP_ENABLED=0` | Bearer + introspection | FR-129, FR-133, 10.4, §7.7 |
 | `GET /service-tasks`, `POST /service-tasks/{id}:close` | задачи СА | СА | FR-012 |
 | `GET /tasks` | состояния задач антивируса/конвертации/email | СА | NFR-014 |
 | `GET /metrics` | Prometheus | внутренняя сеть | NFR-019 |
@@ -693,6 +739,7 @@ components:
 | Комментарии | FR-096–098 | §2.2, §12.3 |
 | Права | FR-099–109 | §3 |
 | Поиск и аналитика | FR-110–127, NFR-001 | §7, §12.3 (search-opens) |
+| Векторный/гибридный поиск (RAG), MCP | FR-133, NFR-022, 16.1-120 | §2.2 (rag_*), §2.5 (rag.*), §7.7, §9 (rag.*), §12.3 |
 | API | FR-128–133, NFR-021 | §12 |
 | Уведомления | FR-134–139, NFR-007 | §8 |
 | Аудит и версии | FR-140–148 | §5, §11 |
@@ -711,6 +758,16 @@ components:
 ## Приложение А. Принятые замечания ревью LLD
 
 Перечень замечаний по раундам ревью; источники согласования — CONCEPT.md 16.1, REQUIREMENTS.md, HLD.md. Замечания заказчика помечаются в заголовке раунда. Заполняется по итогам раундов ревью.
+
+### Раунд 6 (реализация пост-MVP шага [7], ред. 0.5 → 0.6, 10.11.2026)
+
+Замечания, выявленные при синхронизации документов с реализацией RAG/MCP (ветка `rag`; механика — RAG_DESIGN.md). Все приняты, внесены в ред. 0.6.
+
+| № | Замечание | Решение |
+|---|---|---|
+| 39 | §12.2: код `NOT_IMPLEMENTED` для `search_type=vector|hybrid` потерял смысл — типы реализованы (FR-133); фактический отклик на неизвестное значение — `VALIDATION_ERROR` | Строка `NOT_IMPLEMENTED` удалена из §12.2 (код в реализации не используется); строка `/search` §12.3 — все три типа реализованы. Исторические упоминания (раунды 1–2) сохранены как история |
+| 40 | Реализация RAG возвращала `NOT_FOUND` (rag.py, retrieve.py) вместо стабильного `RESOURCE_NOT_FOUND` §12.2 | Код приведён к `RESOURCE_NOT_FOUND` (3 места); контракт §12.2 без изменений |
+| 41 | Механика RAG (чанкеры, конвейер, retrieval, MCP) жила только в RAG_DESIGN.md — не нормативном документе | Перенесена в §2.2/§2.4/§2.5/§7.7/§9/§12.3; RAG_DESIGN.md остаётся не нормативным (источник решений §9 — согласованы с заказчиком 10.11.2026); поведенческие следствия — CONCEPT 16.1-120 |
 
 ### Раунд 3 (реализация MVP, ред. 0.2 → 0.3, 09.11.2026)
 

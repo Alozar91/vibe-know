@@ -45,7 +45,7 @@ def _group_filter(db: Session, group_id: str | None, include_subgroups: bool):
                           detail="group_id — не UUID") from None
     g = db.get(models.Group, gid)
     if g is None or g.is_deleted:
-        raise DomainError(status=404, code="NOT_FOUND", title="Не найдено",
+        raise DomainError(status=404, code="RESOURCE_NOT_FOUND", title="Не найдено",
                           detail="Группа не найдена")
     return (g.path if include_subgroups else None), (None if include_subgroups else gid)
 

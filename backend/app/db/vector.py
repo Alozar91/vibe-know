@@ -9,7 +9,7 @@ from sqlalchemy.types import UserDefinedType
 class Vector(UserDefinedType):
     """rag_chunks.embedding — vector(RAG_EMBEDDING_DIM), pgvector."""
 
-    cached_ok = True
+    cache_ok = True  # dim неизменяем после создания — ключ кэша безопасен
 
     def __init__(self, dim: int | None = None):
         self.dim = dim

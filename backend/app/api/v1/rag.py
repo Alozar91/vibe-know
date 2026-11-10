@@ -1,4 +1,5 @@
-# RAG — транспорт СА-контура (RAG_DESIGN §3, §6, §8-1/2).
+# RAG — транспорт (RAG_DESIGN §3, §6, §7, §8-1/2/3).
+#   СА-контур:
 #   GET    /admin/rag/chunkers               — реестр чанкеров (для UI)
 #   GET    /admin/rag/groups/{id}/config     — явный + effective конфиг
 #   PUT    /admin/rag/groups/{id}/config     — создать/обновить (валидация реестром)
@@ -6,6 +7,8 @@
 #   POST   /admin/rag/test-connection        — проверка embedding-провайдера (§6)
 #   POST   /admin/rag/materials/{id}:reindex — ручная переиндексация материала
 #   POST   /admin/rag/groups/{id}:reindex    — переиндексация поддерева группы
+#   Поиск (§7): POST /rag/retrieve — чанки для RAG-консюмеров (права §3.2);
+#   GET /search?search_type=vector|hybrid — материалы (FR-133, ранее заглушка).
 import uuid
 
 from fastapi import APIRouter, Depends
@@ -139,3 +142,37 @@ def reindex_group_ep(group_id: uuid.UUID, user: CurrentUserDep,
         ) from None
     audit_log(db, user, "rag.reindex_group", "group", group_id, details={})
     return {"group_id": str(group_id), "state": "enqueued"}
+
+
+# ==========================================================================
+# Поиск по чанкам (RAG_DESIGN §7.1-2): POST /rag/retrieve — права §3.2
+# ==========================================================================
+
+class RetrieveIn(BaseModel):
+    query: str = Field(min_length=1, max_length=512)
+    group_id: str | None = None
+    include_subgroups: bool = True
+    k: int = Field(default=10, ge=1, le=20)
+    mode: str = Field(default="vector", pattern="^(vector|hybrid)$")
+
+
+@router.post("/rag/retrieve")
+def retrieve_ep(body: RetrieveIn, user: CurrentUserDep, db=Depends(get_db)) -> dict:
+    """Чанки с оценками для RAG-консюмеров (§7.1-2): права — предикат §3.2.
+
+    Дедуп по материалу (§9-4); k ≤ 20 (§9-5); вызов — в search_events (§7.6).
+    """
+    from app.use_cases.rag.retrieve import log_retrieve_event, retrieve_chunks
+
+    out = retrieve_chunks(
+        db, user,
+        q=body.query, group_id=body.group_id,
+        include_subgroups=body.include_subgroups,
+        k=body.k, mode=body.mode,
+    )
+    # deep_link для UI/консюмеров (§7.1-2): фронт резолвит маршрут материала
+    for it in out["items"]:
+        it["deep_link"] = f"/materials/{it['material']['id']}"
+    log_retrieve_event(db, body.query, out["total"])
+    db.commit()
+    return out

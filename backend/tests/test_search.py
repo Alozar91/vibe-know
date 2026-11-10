@@ -84,10 +84,12 @@ def test_search_requires_auth(client, db):
     assert r.status_code == 401
 
 
-def test_search_type_not_implemented(client, env):
+def test_search_type_vector_requires_rag_pipeline(client, env):
+    """Пост-MVP [7] ч.3 (FR-133 реализован): vector/hybrid работают, но при
+    выключенном конвейере (нет KB_RAG_EMBEDDING_BASE_URL) — 409, не заглушка."""
     r = client.get("/api/v1/search?q=x&search_type=vector")
-    assert r.status_code == 400
-    assert r.json()["code"] == "NOT_IMPLEMENTED"
+    assert r.status_code == 409
+    assert r.json()["code"] == "RAG_EMBEDDING_NOT_CONFIGURED"
 
 
 def test_search_finds_by_name_sqlite(client, env):

@@ -1,4 +1,6 @@
-# FastAPI + Celery, Python 3.15 (HLD §4). Зависимости — uv (uv.lock).
+# FastAPI + Celery, Python 3.15 (HLD §4). Зависимости — uv, резолв при сборке
+# из pyproject.toml (uv.lock убран: CDN files.pythonhosted.org недоступен
+# с сервера развёртывания, см. UV_PYPI_MIRROR в deploy/.env.example).
 FROM python:3.15-slim
 
 WORKDIR /app
@@ -6,17 +8,14 @@ WORKDIR /app
 # uv — стандартный установщик проекта
 COPY --from=ghcr.io/astral-sh/uv:0.11.1 /uv /usr/local/bin/uv
 
-# Слой зависимостей: кэшируется до изменения uv.lock
-COPY pyproject.toml uv.lock ./
-# UV_PYPI_MIRROR (опционально): если files.pythonhosted.org недоступен с сервера
-# (таймауты CDN Fastly), задать зеркало с теми же путями к файлам, например
-# https://pypi.tuna.tsinghua.edu.cn — хэши пакетов в uv.lock остаются валидными.
-# uv sync --frozen качает по абсолютным URL из uv.lock и индекс не подменяет
-# (astral-sh/uv#19625), поэтому URL переписываются на этапе сборки.
+# Слой зависимостей: кэшируется до изменения pyproject.toml
+COPY pyproject.toml ./
+# UV_PYPI_MIRROR (опционально): зеркало PyPI, если files.pythonhosted.org
+# недоступен с сервера (таймауты CDN), например https://pypi.tuna.tsinghua.edu.cn.
+# Резолв и скачивание целиком идут с зеркала; пусто — официальный PyPI.
 ARG UV_PYPI_MIRROR=""
-RUN if [ -n "$UV_PYPI_MIRROR" ]; then \
-      sed -i "s#https://files.pythonhosted.org/packages/#${UV_PYPI_MIRROR}/packages/#g" uv.lock; \
-    fi && uv sync --frozen --no-dev --no-install-project
+RUN if [ -n "$UV_PYPI_MIRROR" ]; then export UV_DEFAULT_INDEX="$UV_PYPI_MIRROR"; fi \
+    && uv sync --no-dev --no-install-project
 
 # Код приложения
 COPY alembic.ini ./

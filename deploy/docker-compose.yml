@@ -33,8 +33,12 @@ services:
         "/bin/bash",
         "-c",
         # Фоновый цикл pgBackRest от postgres (pgBackRest запрещает root);
-        # затем штатный entrypoint postgres (сам понижает права через gosu)
-        "docker-ensure-initdb.sh true >/dev/null 2>&1; su postgres -s /bin/bash -c '/usr/local/bin/pgbackrest.sh' & exec docker-entrypoint.sh postgres -c archive_mode=on -c \"archive_command=test ! -f /backups/pgbackrest/wal/kb/%f && pgbackrest --stanza=kb archive-push %p\" -c archive_timeout=60s -c max_connections=250 -c plan_cache_mode=force_custom_plan",
+        # затем штатный entrypoint postgres (сам понижает права через gosu).
+        # ВАЖНО: docker-ensure-initdb.sh — БЕЗ аргументов: аргументы уходят в
+        # `postgres -C password_encryption` («true» → invalid argument → init
+        # умирает до добавления «host all all all» в pg_hba.conf → Keycloak
+        # не может подключиться; на стенде проявилось при первом старте).
+        "docker-ensure-initdb.sh >/dev/null 2>&1; su postgres -s /bin/bash -c '/usr/local/bin/pgbackrest.sh' & exec docker-entrypoint.sh postgres -c archive_mode=on -c \"archive_command=test ! -f /backups/pgbackrest/wal/kb/%f && pgbackrest --stanza=kb archive-push %p\" -c archive_timeout=60s -c max_connections=250 -c plan_cache_mode=force_custom_plan",
       ]
     volumes:
       # PG18: монтируем /var/lib/pgdata postgres (данные в major-версионном подкаталоге,

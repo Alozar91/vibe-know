@@ -69,18 +69,22 @@ services:
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
-      # Hostname v2: issuer фиксирован (http://localhost:8080/realms/kb). Строгий режим
-      # обязателен: при strict=false hostname резолвится из Host-заголовка, и introspection
-      # через внутренний URL (Host: keycloak:8080) даёт iss-несоответствие → active:false
-      # (keycloak/keycloak#15694). TLS/prod-режим (https://localhost/auth за nginx) —
-      # при внедрении (шаг [6], инструкция deploy/README.md).
-      KC_HOSTNAME: http://localhost:8080
+      # Hostname v2: issuer фиксирован (KC_PUBLIC_URL, по умолчанию локальный стенд).
+      # Строгий режим обязателен: при strict=false hostname резолвится из Host-заголовка,
+      # и introspection через внутренний URL (Host: keycloak:8080) даёт iss-несоответствие
+      # → active:false (keycloak/keycloak#15694). TLS/prod-режим (https://домен/auth за
+      # nginx) — при внедрении (шаг [6], инструкция deploy/README.md).
+      KC_HOSTNAME: ${KB_PUBLIC_URL:-http://localhost}:8080
       KC_HOSTNAME_STRICT: "true"
       KC_PROXY_HEADERS: xforwarded
-      # Переменные для подстановки ${VAR} в realm-kb-test.json при импорте
+      # Переменные для подстановки ${VAR} в realm-kb-test.json при импорте.
+      # KB_PUBLIC_URL (публичный адрес стенда, http://IP или https://домен) —
+      # также KC_HOSTNAME выше, issuer/CORS api/worker и build-arg SPA.
+      # Не задан → пустая строка в JSON (записи «/*»/«» безвредны), localhost-дефолты.
       KB_API_CLIENT_SECRET: ${KB_API_CLIENT_SECRET}
       KB_CLI_CLIENT_SECRET: ${KB_CLI_CLIENT_SECRET}
       KB_TEST_PASSWORD: ${KB_TEST_PASSWORD}
+      KB_PUBLIC_URL: ${KB_PUBLIC_URL:-}
     volumes:
       - ./keycloak/realm-kb-test.json:/opt/keycloak/data/import/realm-kb-test.json:ro
     ports:
@@ -184,11 +188,12 @@ services:
       KB_S3_ACCESS_KEY: ${SILO_ROOT_USER}
       KB_S3_SECRET_KEY: ${SILO_ROOT_PASSWORD}
       KB_GOTENBERG_URL: http://gotenberg:3000
-      KB_OIDC_ISSUER: http://localhost:8080/realms/kb
+      KB_OIDC_ISSUER: ${KB_PUBLIC_URL:-http://localhost}:8080/realms/kb
       KB_OIDC_INTROSPECTION_URL: http://keycloak:8080/realms/kb/protocol/openid-connect/token/introspect
       KB_OIDC_CLIENT_ID: kb-api
       KB_OIDC_CLIENT_SECRET: ${KB_API_CLIENT_SECRET}
-      KB_FRONTEND_URL: http://localhost
+      # Публичный адрес SPA — для CORS (main.py: allow_origins) и ссылок в письмах
+      KB_FRONTEND_URL: ${KB_PUBLIC_URL:-http://localhost}
       # Тестовая регистрация с выбором роли (НЕ для продуктива): задаётся только
       # на тестовом стенде; пусто/false — функция выключена
       KB_TEST_REGISTRATION: ${KB_TEST_REGISTRATION:-false}
@@ -227,7 +232,7 @@ services:
       KB_S3_ACCESS_KEY: ${SILO_ROOT_USER}
       KB_S3_SECRET_KEY: ${SILO_ROOT_PASSWORD}
       KB_GOTENBERG_URL: http://gotenberg:3000
-      KB_OIDC_ISSUER: http://localhost:8080/realms/kb
+      KB_OIDC_ISSUER: ${KB_PUBLIC_URL:-http://localhost}:8080/realms/kb
       KB_OIDC_INTROSPECTION_URL: http://keycloak:8080/realms/kb/protocol/openid-connect/token/introspect
       KB_OIDC_CLIENT_ID: kb-api
       KB_OIDC_CLIENT_SECRET: ${KB_API_CLIENT_SECRET}
@@ -246,6 +251,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/nginx/Dockerfile
+      args:
+        KB_PUBLIC_URL: ${KB_PUBLIC_URL:-}
     container_name: kb-nginx
     logging: *default-logging
     depends_on:

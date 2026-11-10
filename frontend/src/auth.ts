@@ -3,10 +3,11 @@
 // Keycloak 26: /realms/kb/... ; при внедрении (шаг [6]) — /auth/... за nginx TLS
 // (инструкция deploy/README.md, FR-149).
 
-const KC_BASE = 'http://localhost:8080/realms/kb'
+const KC_BASE: string =
+  import.meta.env.VITE_KC_BASE ?? 'http://localhost:8080/realms/kb'
 const CLIENT_ID = 'kb-spa'
 const REDIRECT_URI = window.location.origin + window.location.pathname
-// webOrigins realm: localhost, localhost:5173 — оба origin валидны
+// webOrigins realm: localhost, localhost:5173 + origin стенда (KB_PUBLIC_URL)
 
 interface Tokens {
   access_token: string

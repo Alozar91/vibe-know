@@ -53,6 +53,7 @@ cp deploy/.env.example deploy/.env
 | `BACKUP_RESTIC_PASSWORD` | Пароль шифрования restic-репозитория; смена = старые снапшоты нечитаемы |
 | `BACKUP_INTERVAL_SECONDS` | Интервал цикла копирования (86400 = сутки) |
 | `LOG_LEVEL`, `LOG_MAX_SIZE`, `LOG_MAX_FILE` | Логи приложений и ротация логов контейнеров (HLD §8.3) |
+| `KB_PUBLIC_URL` | Публичный адрес стенда для доступа извне (`http://IP` или `https://домен`): адрес Keycloak в SPA (build-arg), issuer, redirectUris realm, CORS. Пусто — локальный стенд (`localhost`); менять → `docker compose build nginx keycloak api worker` + `down/up keycloak` (realm уже в БД — redirectUris обновятся только при пересоздании realm, `down -v`) |
 
 ### 2.3. Запуск
 

@@ -91,6 +91,11 @@ services:
       KB_CLI_CLIENT_SECRET: ${KB_CLI_CLIENT_SECRET}
       KB_TEST_PASSWORD: ${KB_TEST_PASSWORD}
       KB_PUBLIC_URL: ${KB_PUBLIC_URL:-}
+      # PKCE-метод клиента kb-spa (политика realm): S256 в prod (HTTPS), plain
+      # допустим только на http-стендах (crypto.subtle недоступен вне secure
+      # context — SPA фолбэчится на plain, RFC 7636 §4.2). Локальный стенд на
+      # localhost — secure context, SPA шлёт S256: дефолт S256.
+      KB_PKCE_METHOD: ${KB_PKCE_METHOD:-S256}
       # Адрес Keycloak (issuer): https://домен → https://домен/auth (TLS за nginx,
       # порт 8080 наружу не публикуется); иначе http://…:8080 напрямую. См. .env.
       KC_HOSTNAME_URL: ${KC_HOSTNAME_URL:-http://localhost:8080}

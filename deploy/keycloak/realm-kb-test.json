@@ -35,7 +35,7 @@
         "${KB_PUBLIC_URL}"
       ],
       "attributes": {
-        "pkce.code.challenge.method": "S256"
+        "pkce.code.challenge.method": "${KB_PKCE_METHOD}"
       },
       "protocol": "openid-connect",
       "protocolMappers": [

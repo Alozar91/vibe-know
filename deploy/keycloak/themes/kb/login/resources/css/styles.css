@@ -47,9 +47,12 @@
     --keycloak-card-top-color: transparent;
     /* Стандартный фон keycloak.v2 (тёмный keycloak-bg) не используется */
     --keycloak-bg-logo-url: none;
+    --keycloak-logo-url: none;
 }
 
-/* ===== Фон страницы: светлый, как фон приложения ===== */
+/* ===== Фон страницы: светлый, как фон приложения =====
+   (каркасный keycloak-v2.css задаёт background через --keycloak-bg-logo-url;
+   перекрываем после него — порядок подключения в theme.properties) */
 .login-pf body,
 body#keycloak-bg {
     background: var(--kb-bg);

@@ -107,6 +107,11 @@ docker compose exec api python -c "from app.worker.tasks import keycloak_sync; k
 (`defaultLocale: ru`). Тёмная тема у SPA включается вручную — login-страницы
 всегда светлые (`darkMode=false`).
 
+Важно: свойство `styles` в `theme.properties` дочерней темы **замещает**
+родительский список — каркасный CSS `keycloak.v2` (`css/keycloak-v2.css`,
+скопирован в тему) подключается явно; без него раскладка карточки
+(grid 34rem, отступы) теряется и оформление «едет».
+
 Правки CSS подхватываются без рестарта (start-dev не кэширует темы;
 в prod-режиме `start --optimized` — рестарт keycloak). На **существующем**
 стенде realm-импорт пропускается — включение темы/локали через kcadm:

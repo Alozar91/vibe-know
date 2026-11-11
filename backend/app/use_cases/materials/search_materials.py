@@ -541,6 +541,24 @@ def _vector_search(
         row = vec_rows[vr] if vr is not None else None
         return 1.0 - float(row.dist) if row is not None else -1.0
 
+    # Скор для UI (§7.7): vector — косинусная близость лучшего чанка (1-d, 0..1);
+    # hybrid — RRF-скор Σ1/(60+rank) (потолок 2/(60+1) ≈ 0.0328; сопоставим
+    # только внутри одной выдачи). Кандидат без чанков (FTS-only) — score нет.
+    # Ключи — str(id): элементы выдачи несут строковый id (to_list_item).
+    # SQLite-заглушка дистанции (len(content)) семантики близости не несёт —
+    # 1-d уходит минус-бесконечности: клампим 0..1 (сортировка на SQLite не
+    # меняется — порядок задаёт _rank по сырой дистанции, не клампнутый score)
+    scores: dict = {}
+    if search_type == "vector":
+        for i, r in enumerate(vec_rows):
+            scores[str(r.material_id)] = round(max(0.0, min(1.0, 1.0 - float(r.dist))), 4)
+    else:  # hybrid
+        for i, r in enumerate(vec_rows):
+            scores[str(r.material_id)] = round(1.0 / (rag_ret.RRF_K + i + 1), 6)
+        for i, (mid, _rk) in enumerate(fts):
+            if mid in scores:
+                scores[str(mid)] = round(scores[str(mid)] + 1.0 / (rag_ret.RRF_K + i + 1), 6)
+
     # Кандидаты: материалы, подходящие под фильтры и права; сортировка — ранг
     stmt = select(M).join(MG, MG.id == M.group_id).where(*m_conds, perm)
     for e in extra:
@@ -554,6 +572,12 @@ def _vector_search(
     rows = candidates[(page - 1) * per_page: page * per_page]
 
     items = [to_list_item(m) for m in rows]
+    # Релевантность в UI (§7.7): score — для vector/hybrid (fulltext не отдаёт:
+    # ts_rank несравним с косинусной близостью)
+    for item in items:
+        s = scores.get(item["id"])
+        if s is not None:
+            item["score"] = s
 
     # Аналитика (§7.6, FR-127)
     event_id = None

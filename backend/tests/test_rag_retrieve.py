@@ -280,6 +280,23 @@ class TestSearchTypes:
         assert out["items"][0]["id"] == str(m.id)
         assert "group" in out["items"][0] or "name" in out["items"][0]
 
+    def test_vector_type_has_score(self, db, rag_query_on):
+        """Релевантность в UI (§7.7): каждый элемент vector-выдачи со чанками
+        несёт score (1−dist, 0..1); у материала со чанками он есть всегда."""
+        from app.use_cases.materials.search_materials import search_materials
+
+        u = _user(db, "Пользователь Скорвектор")
+        principal = _principal(db, u, is_super=True)
+        g = _make_group(db)
+        m = _material(db, g, u, "Скор векторного поиска",
+                      "Паркетные скор-тезисы. " * 40)
+        _index(db, m)
+        out = search_materials(db, principal, q="паркетные", search_type="vector")
+        assert out["total"] >= 1
+        hit = next(i for i in out["items"] if i["id"] == str(m.id))
+        assert isinstance(hit["score"], (int, float))
+        assert 0.0 <= hit["score"] <= 1.0
+
     def test_hybrid_type(self, db, rag_query_on):
         from app.use_cases.materials.search_materials import search_materials
 
@@ -291,9 +308,12 @@ class TestSearchTypes:
         _index(db, m)
         out = search_materials(db, principal, q="гибридный", search_type="hybrid")
         assert out["total"] >= 1
+        hit = next(i for i in out["items"] if i["id"] == str(m.id))
+        # RRF-скор положителен и мал (потолок 2/(60+1) ≈ 0.0328)
+        assert 0 < hit["score"] <= 2 / 61
 
     def test_fulltext_still_works(self, db):
-        """Регресс: fulltext не тронут (SQLite ILIKE-ветка)."""
+        """Регресс: fulltext не тронут (SQLite ILIKE-ветка), score не отдаётся."""
         from app.use_cases.materials.search_materials import search_materials
 
         u = _user(db, "Пользователь Фуллтекст")
@@ -302,6 +322,7 @@ class TestSearchTypes:
         _material(db, g, u, "Регламент паркетных работ", "Текст. " * 10)
         out = search_materials(db, principal, q="паркетных", search_type="fulltext")
         assert out["total"] >= 1
+        assert all("score" not in i for i in out["items"])
 
 
 class TestRetrieveAPI:

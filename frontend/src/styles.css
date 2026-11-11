@@ -489,3 +489,18 @@ details.summary-box > summary { cursor: pointer; font-size: 13px; color: var(--m
 .tagopt { display: inline-flex; align-items: center; gap: 5px; font-size: 13.5px; }
 .searchhit { padding: 12px 4px; border-bottom: 1px solid var(--line); }
 .searchhit .hltext { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+/* Релевантность (vector/hybrid, §7.7): полоса + число рядом с заголовком */
+.scorebar {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-left: 10px; vertical-align: middle;
+}
+.scorebar .sb-track,
+.scorebar .sb-fill {
+  display: inline-block; height: 6px; border-radius: 3px; min-width: 2px;
+}
+.scorebar .sb-track { position: relative; width: 90px; background: var(--line); overflow: hidden; }
+.scorebar .sb-fill { position: absolute; inset: 0 auto 0 0; }
+.scorebar .sb-fill.hi { background: var(--okfg, #2e7d32); }
+.scorebar .sb-fill.mid { background: var(--warnfg, #b26a00); }
+.scorebar .sb-fill.low { background: var(--muted, #888); }
+.scorebar .sb-num { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }

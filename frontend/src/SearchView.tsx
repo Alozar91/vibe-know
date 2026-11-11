@@ -7,7 +7,12 @@ import { fmtDate, type Material, type Page } from './types'
 import { Empty, Err, Pager, StatusBadge, STATUS_RU } from './ui'
 
 interface GroupHit { id: string; name: string; path: string }
-interface SearchPage extends Page<Material> {
+interface SearchHit extends Material {
+  headline?: string
+  /** Релевантность (vector/hybrid): vector — 1−dist (0..1); hybrid — RRF. */
+  score?: number
+}
+interface SearchPage extends Page<SearchHit> {
   groups: GroupHit[]
   query: string
   search_event_id: string | null
@@ -94,6 +99,10 @@ export default function SearchView({ onOpenMaterial, initialQuery }: Props) {
   const pages = data ? Math.max(1, Math.ceil(data.total / PER_PAGE)) : 1
   const canPrev = page > 1
   const canNext = data ? page * PER_PAGE < data.total : false
+  // Гибрид: полоса — доля от лучшего скора этой выдачи (шкала RRF относительна)
+  const maxScore = data && searchType === 'hybrid'
+    ? Math.max(...data.items.map((m) => m.score ?? 0), Number.EPSILON)
+    : 1
 
   return (
     <div>
@@ -188,6 +197,9 @@ export default function SearchView({ onOpenMaterial, initialQuery }: Props) {
                   </a>{' '}
                   <StatusBadge status={m.status} />{' '}
                   <small className="mono">{fmtDate(m.updated_at)}</small>
+                  {typeof m.score === 'number' && searchType !== 'fulltext' && (
+                    <ScoreBar score={m.score} mode={searchType} max={maxScore} />
+                  )}
                   {m.headline && (
                     <div className="hltext" dangerouslySetInnerHTML={{ __html: m.headline }} />
                   )}
@@ -208,5 +220,31 @@ export default function SearchView({ onOpenMaterial, initialQuery }: Props) {
         </>
       )}
     </div>
+  )
+}
+
+/** Релевантность в выдаче (§7.7): полоса + число.
+ *
+ * vector — score = 1−dist, косинусная близость запроса и лучшего чанка
+ * материала (0..1; 1 = совпадение) — полоса в абсолютной шкале.
+ * hybrid — RRF-скор Σ1/(60+rank): максимум мал (2/(60+1) ≈ 0.033) и шкала
+ * относительна — полоса показывает долю от лучшего результата этой выдачи
+ * (лидер всегда 100% — эталон сравнения), число — абсолютное значение.
+ */
+function ScoreBar({ score, mode, max }: { score: number; mode: 'vector' | 'hybrid'; max: number }) {
+  const title = mode === 'vector'
+    ? 'Векторная близость запроса и лучшего фрагмента материала (1 — совпадение)'
+    : 'Гибридный ранг (RRF): сумма вкладов полнотекстового и векторного потоков; полоса — доля от лучшего результата выдачи'
+  const frac = mode === 'vector' ? score : score / max
+  return (
+    <span className="scorebar" title={title}>
+      <span className="sb-track">
+        <span
+          className={frac >= 0.75 ? 'sb-fill hi' : frac >= 0.45 ? 'sb-fill mid' : 'sb-fill low'}
+          style={{ width: `${Math.max(2, Math.min(100, frac * 100))}%` }}
+        />
+      </span>
+      <span className="sb-num">{mode === 'vector' ? score.toFixed(2) : score.toFixed(4)}</span>
+    </span>
   )
 }

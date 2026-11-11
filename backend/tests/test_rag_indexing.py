@@ -192,6 +192,58 @@ class TestIndexMaterial:
         assert all(c.version_id == ver2 for c in chunks)
         assert not ({c.id for c in chunks} & ids1)
 
+    def test_status_transition_gap(self, db, rag_on):
+        """Регресс (стенд 11.11.2026, result=missing): materials.version растёт
+        от переходов статуса (§5.1: статусы версией не являются — строки
+        material_versions не создают), а индексация искала строку
+        number == m.version → missing навсегда, state замирал в pending,
+        reconcile переставлял задачу ежечасно. Чанки привязываются к последней
+        контентной версии (max number), счётчик расходиться не мешает."""
+        from app.rag.indexing import index_material
+
+        g = _make_group(db)
+        m = _make_material(db, g, text="Текст до перехода статуса. " * 20)
+        # Переход статуса в обход API: version +1, строки версии НЕТ (§5.1)
+        m.version += 1
+        m.status = models.MaterialStatus("in_review")
+        db.commit()
+        assert m.version == 2  # строка с number=2 не существует
+
+        res = index_material(db, m.id, client=FakeClient())
+        assert res["result"] == "indexed", res  # было: missing
+        db.refresh(m)
+        assert m.rag_state == "indexed" and m.rag_stale is False
+        ver1 = db.execute(
+            select(models.MaterialVersion.id).where(
+                models.MaterialVersion.material_id == m.id,
+                models.MaterialVersion.number == 1)
+        ).scalar_one()
+        chunks = db.execute(
+            select(models.RagChunk).where(models.RagChunk.material_id == m.id)
+        ).scalars().all()
+        assert len(chunks) == res["chunks"]
+        assert all(c.version_id == ver1 for c in chunks)
+
+    def test_no_versions_at_all(self, db, rag_on):
+        """Аномалия: контентных версий нет вовсе → missing без замирания в
+        pending (иначе reconcile переставлял бы задачу вечно)."""
+        from app.rag.indexing import index_material
+
+        g = _make_group(db)
+        m = models.Material(
+            group_id=g.id, name="Без версий", normalized_name="без версий",
+            type_id=_type_id(db), status=models.MaterialStatus("draft"),
+            author_id=_user_id(db), last_editor_id=_user_id(db),
+            text_content="Текст без строк версий.",
+        )
+        db.add(m)
+        db.commit()
+
+        res = index_material(db, m.id, client=FakeClient())
+        assert res["result"] == "missing"
+        db.refresh(m)
+        assert m.rag_state == "none" and m.rag_stale is False
+
     def test_unchanged_fastpath(self, db, rag_on):
         """§5 экономия: тот же текст → content_hash совпал → эмбеддинг не звался."""
         from app.rag.indexing import index_material

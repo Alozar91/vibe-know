@@ -90,14 +90,24 @@ def index_material(db: Session, material_id, client: EmbeddingClient | None = No
         db.commit()
         return {"result": "disabled", "chunks_removed": n}
 
-    # Текущая версия и текст (§5-2): снапшот версии — источник истины
+    # Текущая контентная версия — последняя строка material_versions (LLD §5.1:
+    # статусы/права/master_id версией не являются, materials.version растёт и от
+    # них — number == m.version не гарантирован после перехода статуса; §7.7:
+    # «чанки текущей версии» = актуальный контент = последняя версия).
+    # Прежний поиск по number == m.version после любого перехода статуса давал
+    # missing навсегда (state замирал в pending, reconcile переставлял ежечасно).
     ver = db.execute(
-        select(models.MaterialVersion).where(
-            models.MaterialVersion.material_id == m.id,
-            models.MaterialVersion.number == m.version,
-        )
+        select(models.MaterialVersion)
+        .where(models.MaterialVersion.material_id == m.id)
+        .order_by(models.MaterialVersion.number.desc())
+        .limit(1)
     ).scalar_one_or_none()
     if ver is None:
+        # Контентных версий нет вовсе (аномалия данных): вставлять чанки некуда.
+        # Снимаем pending/stale — иначе rag.reconcile переставлял бы задачу вечно
+        m.rag_state = RAG_STATE_NONE
+        m.rag_stale = False
+        db.commit()
         return {"result": "missing"}
 
     text = _version_text(db, ver)

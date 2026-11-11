@@ -7,11 +7,14 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.db import models
+from app.logging import get_logger
 from app.rag import registry
 from app.rag.embeddings import EmbeddingClient, EmbeddingError
 from app.rag.chunkers import content_hash
 
-log = logging.getLogger(__name__)
+# structlog (kwargs-стиль событий: log.info("rag.index_material", material=...));
+# stdlib logging.getLogger падает TypeError'ом Logger._log() на kwargs
+log = get_logger(__name__)
 
 # Состояния materials.rag_state (RAG_DESIGN §2 — по образцу file_objects):
 RAG_STATE_NONE = "none"        # конвейер off / материал вне индексируемого поддерева

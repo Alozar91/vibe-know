@@ -1,0 +1,10 @@
+# Shell-скрипты в контейнеры копируются как есть (Dockerfile COPY) —
+# CRLF в рабочей копии ломает shebang («cannot execute: required file
+# not found», байт \r после интерпретатора). Форсируем LF навсегда.
+*.sh text eol=lf
+*.py text
+*.md text
+*.json text
+*.yml text
+*.yaml text
+*.toml text

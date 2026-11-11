@@ -1,0 +1,24 @@
+# MSS clamp для docker-трафика на хостах с MTU < 1500 (deploy/README.md §6.1).
+# --clamp-mss-to-pmtu подстраивает MSS под PMTU маршрута пакета: на VPS с
+# каналом 1450 контейнеры перестают рекламировать MSS 1460 (класс «чёрной
+# дыры PMTUD» для клиентов за туннелями операторов); на сервере с MTU 1500
+# правило — no-op. Синопсис установки: cp в /etc/systemd/system/,
+# daemon-reload, enable --now.
+[Unit]
+Description=MSS clamping for docker traffic (PMTU black-hole protection)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Одно правило в FORWARD без -i/-o: весь контейнерный трафик (docker0 и все
+# br-мосты compose, published-порты через DNAT) транзитом проходит FORWARD.
+# SYN+ACK наружу (ens3, PMTU 1450) зажимается до 1410 → клиенты шлют сегменты,
+# помещающиеся в канал даже при сломанном PMTUD на их стороне (эпизод
+# 10.11.2026); SYN внутрь (мост 1500) не меняется. Идемпотентно: -C → -A.
+ExecStart=/bin/sh -c '/usr/sbin/iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || /usr/sbin/iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu'
+ExecStop=/bin/sh -c '/usr/sbin/iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true'
+
+[Install]
+WantedBy=multi-user.target

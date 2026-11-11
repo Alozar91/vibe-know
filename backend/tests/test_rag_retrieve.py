@@ -312,6 +312,27 @@ class TestSearchTypes:
         # RRF-скор положителен и мал (потолок 2/(60+1) ≈ 0.0328)
         assert 0 < hit["score"] <= 2 / 61
 
+    def test_hybrid_fts_boost_applied(self, db, rag_query_on):
+        """Дефект сопровождения 11.11.2026: _fts_candidates на PG возвращает
+        uuid.UUID, ключи fts_pos строились из UUID, а lookup — по str(id) →
+        FTS-вклад в hybrid /search молча терялся (скор = 1/61 всегда).
+        Материал в ОБОИХ потоках должен получить скор > векторного вклада."""
+        from app.use_cases.materials.search_materials import search_materials
+
+        u = _user(db, "Пользователь Фтсбуст")
+        principal = _principal(db, u, is_super=True)
+        g = _make_group(db)
+        m = _material(db, g, u, "Материал фтс-буста",
+                      "Уникальный маркер квантовый демодулятор. " * 30)
+        _index(db, m)
+        out = search_materials(
+            db, principal, q="квантовый демодулятор", search_type="hybrid")
+        assert out["total"] >= 1
+        hit = next(i for i in out["items"] if i["id"] == str(m.id))
+        # Векторный вклад один — ровно 1/61; FTS-буст делает скор строго больше
+        assert hit["score"] > 1.0 / 61, (
+            f"FTS-вклад потерян: score={hit['score']} == только векторный 1/61")
+
     def test_fulltext_still_works(self, db):
         """Регресс: fulltext не тронут (SQLite ILIKE-ветка), score не отдаётся."""
         from app.use_cases.materials.search_materials import search_materials

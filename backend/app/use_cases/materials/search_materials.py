@@ -539,7 +539,10 @@ def _vector_search(
     fts: list = []
     if search_type == "hybrid":
         fts = rag_ret._fts_candidates(db, user, q, group_path, group_exact, 200)
-    fts_pos = {mid: i for i, (mid, _rk) in enumerate(fts)}
+    # Ключи — str(id): элементы выдачи несут строковый id, а _fts_candidates
+    # на PG возвращает uuid.UUID (дефект сопровождения 11.11.2026: UUID-ключи
+    # fts_pos не совпадали со str-lookup — FTS-вклад молча терялся).
+    fts_pos = {str(mid): i for i, (mid, _rk) in enumerate(fts)}
 
     # Ранг и скор — единый расчёт по потокам (§9-3, §7.7). Ключи — str(id):
     # элементы выдачи несут строковый id (to_list_item).

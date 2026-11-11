@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 
 from datetime import datetime, timezone
 
@@ -447,8 +448,15 @@ def _maybe_extract(fo: models.FileObject) -> None:
 # перезапускаются; обработчики остальных этапов добавляются в STARTUP_TASKS.
 @celery_app.task(name="files.reconcile")
 def files_reconcile() -> dict:
-    """Перезапуск queued-задач этапа 6 (файлы) после сбоя брокера/worker."""
+    """Перезапуск queued-задач этапа 6 (файлы) после сбоя брокера/worker.
+
+    Бэкфилл (16.1-121, LLD §6.3 «повторное извлечение — при обнаружении
+    отсутствия записи»): файлы с ref_count > 0 без записи file_texts
+    (загружены до включения шага [8], либо запись потеряна) — постановка
+    files.extract. Отсутствие записи ≠ failed: failed — результат попытки.
+    """
     restarted = 0
+    backfilled = 0
     with get_session_factory()() as db:
         rows = db.execute(
             select(models.SystemTask).where(
@@ -464,7 +472,42 @@ def files_reconcile() -> dict:
             elif t.task_type == "extraction":
                 files_extract.apply_async(args=[str(t.id), str(t.object_id)])
             restarted += 1
-    return {"restarted": restarted}
+
+        # Бэкфилл отсутствующих file_texts (16.1-121, LLD §6.3): файлы с
+        # привязкой без записи file_texts, у которых НЕТ живой extraction-задачи
+        # (queued/running — их перезапустили выше; failed/done — не в счёт).
+        # Живые задачи — заранее в Python: сравнение object_id (Text) с
+        # file_objects.id (UUID) ненадёжно между dialect'ами (SQLite хранит
+        # UUID как hex без дефисов) — нормализация обеих сторон через uuid.UUID.
+        def _norm_id(v) -> str:
+            try:
+                return uuid.UUID(str(v)).hex
+            except (ValueError, AttributeError, TypeError):
+                return str(v)
+
+        live = db.execute(
+            select(models.SystemTask.object_id).where(
+                models.SystemTask.task_type == "extraction",
+                models.SystemTask.state.in_(["queued", "running"]),
+            )
+        ).scalars().all()
+        live_ids = {_norm_id(v) for v in live}
+        orphans = db.execute(
+            select(models.FileObject)
+            .outerjoin(models.FileText, models.FileText.file_id == models.FileObject.id)
+            .where(
+                models.FileObject.ref_count > 0,
+                models.FileObject.scan_state == "ready",
+                models.FileText.file_id.is_(None),
+            )
+        ).scalars().all()
+        for fo in orphans:
+            if _norm_id(fo.id) in live_ids:
+                continue
+            _maybe_extract(fo)
+            backfilled += 1
+    log.info("files.reconcile", restarted=restarted, backfilled=backfilled)
+    return {"restarted": restarted, "backfilled": backfilled}
 
 
 # ==========================================================================

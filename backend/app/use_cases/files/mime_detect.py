@@ -92,6 +92,15 @@ def is_office_mime(mime: str) -> bool:
     }
 
 
+# Базовый набор извлекаемых форматов (16.1-121, LLD §6.3)
+EXTRACTABLE_MIMES = frozenset({
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/pdf",
+})
+
+
 def is_extractable_mime(mime: str) -> bool:
     """Форматы извлечения текста → files.extract (16.1-121, FR-154, LLD §6.3).
 
@@ -99,12 +108,7 @@ def is_extractable_mime(mime: str) -> bool:
     MS Office (msword/vnd.ms-*) — без текстового слоя в рамках шага [8]:
     экстрактор OOXML+PDF, конвертация в PDF для них не предусмотрена.
     """
-    return mime in {
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "application/pdf",
-    }
+    return mime in EXTRACTABLE_MIMES
 
 
 def is_text_mime(mime: str) -> bool:

@@ -603,7 +603,8 @@ class TestReconcile:
             size_bytes=1, sha256=uuid.uuid4().hex, scan_state="ready", ref_count=1,
         )
         db.add(fo)
-        t = models.SystemTask(task_type="extraction", object_type=fo.id,
+        db.flush()  # id назначен до создания задачи (иначе object_id=None)
+        t = models.SystemTask(task_type="extraction", object_type="file",
                               object_id=fo.id, state="queued")
         db.add(t)
         db.commit()
@@ -629,3 +630,83 @@ class TestReconcile:
         res = wt.files_reconcile.run()
         assert res["restarted"] >= 1
         assert len(extracted) == 1
+
+    def test_reconcile_backfills_missing_file_texts(self, db, monkeypatch):
+        """16.1-121/LLD §6.3: файлы с привязкой без записи file_texts (до
+        включения шага [8]) — бэкфилл ставит files.extract; с записью — нет."""
+        import app.worker.tasks as wt
+
+        from tests.test_files_versions import _FakeFactory
+
+        monkeypatch.setattr(wt, "get_session_factory", lambda: _FakeFactory(db))
+
+        g = _make_group(db)
+        # Файл без записи file_texts (загружен до шага [8])
+        m1 = _make_material(db, g)
+        fo1 = _make_file(db, m1, sha_hex="bf" * 32)
+        # Файл с готовой записью — бэкфилл не нужен
+        m2 = _make_material(db, g)
+        fo2 = _make_file(db, m2, sha_hex="ca" * 32)
+        db.add(models.FileText(file_id=fo2.id, state="ready", text="готово"))
+        # Файл без привязки (ref_count=0) — не бэкфилится
+        fo3 = models.FileObject(
+            cas_key="db" * 32, filename="orphan.pdf", mime_type="application/pdf",
+            size_bytes=1, sha256="db" * 32, scan_state="ready", ref_count=0,
+        )
+        db.add(fo3)
+        db.commit()
+
+        class _T:
+            @staticmethod
+            def apply_async(*a, **k):
+                pass
+
+        monkeypatch.setattr(wt, "files_scan", _T())
+        monkeypatch.setattr(wt, "files_convert", _T())
+        monkeypatch.setattr(wt, "files_extract", _T())
+
+        res = wt.files_reconcile.run()
+        assert res["backfilled"] == 1  # только fo1
+        tasks = db.execute(
+            select(models.SystemTask).where(models.SystemTask.task_type == "extraction")
+        ).scalars().all()
+        by_file = {str(t.object_id): t.state for t in tasks}
+        assert by_file[str(fo1.id)] == "queued"   # бэкфилл поставил
+        assert str(fo2.id) not in by_file          # запись есть — пропущен
+        assert str(fo3.id) not in by_file          # ref_count=0 — пропущен
+
+    def test_reconcile_backfill_no_duplicate_for_live_task(self, db, monkeypatch):
+        """Файл с живой queued extraction-задачей и без записи file_texts:
+        перезапуск первой ветки — ровно одна задача, бэкфилл дубль не ставит."""
+        import app.worker.tasks as wt
+
+        from tests.test_files_versions import _FakeFactory
+
+        monkeypatch.setattr(wt, "get_session_factory", lambda: _FakeFactory(db))
+
+        g = _make_group(db)
+        m = _make_material(db, g)
+        fo = _make_file(db, m, sha_hex="ee" * 32)
+        t = models.SystemTask(task_type="extraction", object_type="file",
+                              object_id=fo.id, state="queued")
+        db.add(t)
+        db.commit()
+
+        extracted = []
+
+        class _T:
+            @staticmethod
+            def apply_async(*a, **k):
+                extracted.append(a)
+
+        monkeypatch.setattr(wt, "files_scan", _T())
+        monkeypatch.setattr(wt, "files_convert", _T())
+        monkeypatch.setattr(wt, "files_extract", _T())
+
+        res = wt.files_reconcile.run()
+        assert res["backfilled"] == 0  # живая задача есть — бэкфилл молчит
+        tasks = db.execute(
+            select(models.SystemTask).where(models.SystemTask.task_type == "extraction")
+        ).scalars().all()
+        assert len(tasks) == 1  # дубля нет
+        assert len(extracted) == 1  # перезапущена первой веткой

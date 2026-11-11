@@ -218,6 +218,15 @@ services:
       # MCP-сервер (RAG_DESIGN §8-5): read-only тулы kb_search/kb_groups на
       # /api/v1/mcp; аутентификация — Bearer Keycloak. По умолчанию включён.
       KB_MCP_ENABLED: ${KB_MCP_ENABLED:-true}
+      # RAG (LLD §7.7): api применяет миграцию 0011 (фиксирует
+      # KB_RAG_EMBEDDING_DIM) и обслуживает поиск; worker выполняет
+      # индексацию. Пустой base_url — конвейер выключен (штатно).
+      KB_RAG_EMBEDDING_BASE_URL: ${KB_RAG_EMBEDDING_BASE_URL:-}
+      KB_RAG_EMBEDDING_API_KEY: ${KB_RAG_EMBEDDING_API_KEY:-}
+      KB_RAG_EMBEDDING_MODEL: ${KB_RAG_EMBEDDING_MODEL:-text-embedding-3-small}
+      KB_RAG_EMBEDDING_DIM: ${KB_RAG_EMBEDDING_DIM:-1536}
+      KB_RAG_EMBEDDING_TIMEOUT: ${KB_RAG_EMBEDDING_TIMEOUT:-30}
+      KB_RAG_EMBEDDING_BATCH: ${KB_RAG_EMBEDDING_BATCH:-32}
       KB_LOG_LEVEL: ${LOG_LEVEL}
     ports:
       # 8000 на хосте занят сторонним процессом — хост-маппинг 8001 (внутри сети — 8000)
@@ -259,6 +268,13 @@ services:
       KB_OIDC_INTROSPECTION_URL: http://keycloak:8080/realms/kb/protocol/openid-connect/token/introspect
       KB_OIDC_CLIENT_ID: kb-api
       KB_OIDC_CLIENT_SECRET: ${KB_API_CLIENT_SECRET}
+      # RAG (LLD §7.7): worker выполняет индексацию; параметры — те же, что у api
+      KB_RAG_EMBEDDING_BASE_URL: ${KB_RAG_EMBEDDING_BASE_URL:-}
+      KB_RAG_EMBEDDING_API_KEY: ${KB_RAG_EMBEDDING_API_KEY:-}
+      KB_RAG_EMBEDDING_MODEL: ${KB_RAG_EMBEDDING_MODEL:-text-embedding-3-small}
+      KB_RAG_EMBEDDING_DIM: ${KB_RAG_EMBEDDING_DIM:-1536}
+      KB_RAG_EMBEDDING_TIMEOUT: ${KB_RAG_EMBEDDING_TIMEOUT:-30}
+      KB_RAG_EMBEDDING_BATCH: ${KB_RAG_EMBEDDING_BATCH:-32}
       KB_LOG_LEVEL: ${LOG_LEVEL}
     # Экспозер метрик worker — порт 9808 (внутренняя сеть, LLD §9)
     healthcheck:

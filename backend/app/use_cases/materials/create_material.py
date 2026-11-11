@@ -131,5 +131,11 @@ def create_material(
 
     update_search_vector(db, m)
 
+    # Пост-MVP [7]: RAG-хук (§5) — pending для конвейера индексации
+    from app.rag.indexing import flush_rag_enqueue, hook_after_change
+
+    hook_after_change(db, m)
+
     db.commit()
+    flush_rag_enqueue(db)  # постановка в брокер — после коммита (§9)
     return to_out(m)

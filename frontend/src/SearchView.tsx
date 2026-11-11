@@ -31,6 +31,7 @@ export default function SearchView({ onOpenMaterial, initialQuery }: Props) {
   const [includeArchive, setIncludeArchive] = useState(false)
   const [masterFilter, setMasterFilter] = useState('')
   const [status, setStatus] = useState('')
+  const [searchType, setSearchType] = useState<'fulltext' | 'vector' | 'hybrid'>('fulltext')
   const [sort, setSort] = useState('relevance')
   const [order, setOrder] = useState<'asc' | 'desc'>('desc')
   const [data, setData] = useState<SearchPage | null>(null)
@@ -45,6 +46,7 @@ export default function SearchView({ onOpenMaterial, initialQuery }: Props) {
     const p = new URLSearchParams()
     if (q.trim()) p.set('q', q.trim())
     p.set('partial', String(partial))
+    p.set('search_type', searchType)
     p.set('include_archive', String(includeArchive))
     if (masterFilter) p.set('master_filter', masterFilter)
     if (status) p.set('status', status)
@@ -56,7 +58,7 @@ export default function SearchView({ onOpenMaterial, initialQuery }: Props) {
       .then(setData)
       .catch((e) => setError(e.detail ?? String(e)))
       .finally(() => setBusy(false))
-  }, [q, partial, includeArchive, masterFilter, status, sort, order, page])
+  }, [q, partial, includeArchive, masterFilter, status, searchType, sort, order, page])
 
   useEffect(() => {
     run()
@@ -106,6 +108,13 @@ export default function SearchView({ onOpenMaterial, initialQuery }: Props) {
             onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); run() } }}
           />
           <button className="btn primary" onClick={() => { setPage(1); run() }} disabled={busy}>Найти</button>
+          <label className="srchfld">Режим:
+            <select value={searchType} onChange={(e) => { setSearchType(e.target.value as 'fulltext' | 'vector' | 'hybrid'); setPage(1) }}>
+              <option value="fulltext">полнотекстовый</option>
+              <option value="vector">векторный (RAG)</option>
+              <option value="hybrid">гибридный (RRF)</option>
+            </select>
+          </label>
           <label className="checkrow">
             <input type="checkbox" checked={partial}
                    onChange={(e) => { setPartial(e.target.checked); setPage(1) }} />
@@ -132,17 +141,21 @@ export default function SearchView({ onOpenMaterial, initialQuery }: Props) {
               <option value="children">только подчинённые</option>
             </select>
           </label>
-          <label className="srchfld">Сортировка:
-            <select value={sort} onChange={(e) => { setSort(e.target.value); setPage(1) }}>
-              <option value="relevance">релевантность</option>
-              <option value="name">название</option>
-              <option value="updated_at">дата изменения</option>
-              <option value="published_at">дата публикации</option>
-            </select>
-          </label>
-          <button className="pg" onClick={() => setOrder(order === 'asc' ? 'desc' : 'asc')}>
-            {order === 'asc' ? '↑' : '↓'}
-          </button>
+          {searchType === 'fulltext' && (
+            <>
+              <label className="srchfld">Сортировка:
+                <select value={sort} onChange={(e) => { setSort(e.target.value); setPage(1) }}>
+                  <option value="relevance">релевантность</option>
+                  <option value="name">название</option>
+                  <option value="updated_at">дата изменения</option>
+                  <option value="published_at">дата публикации</option>
+                </select>
+              </label>
+              <button className="pg" onClick={() => setOrder(order === 'asc' ? 'desc' : 'asc')}>
+                {order === 'asc' ? '↑' : '↓'}
+              </button>
+            </>
+          )}
         </div>
       </div>
 

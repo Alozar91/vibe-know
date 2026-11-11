@@ -16,10 +16,11 @@ import NotificationTriggers from './NotificationTriggers'
 import AuditLog from './AuditLog'
 import SystemSettings from './SystemSettings'
 import ServiceDesk from './ServiceDesk'
+import RagAdmin from './RagAdmin'
 import { applyTheme, loadTheme, type Theme } from './theme'
 import './styles.css'
 
-type View = { kind: 'browser' } | { kind: 'sections' } | { kind: 'matrix' } | { kind: 'search'; q: string } | { kind: 'analytics' } | { kind: 'material'; id: string } | { kind: 'triggers' } | { kind: 'audit' } | { kind: 'settings' } | { kind: 'service' }
+type View = { kind: 'browser' } | { kind: 'sections' } | { kind: 'matrix' } | { kind: 'search'; q: string } | { kind: 'analytics' } | { kind: 'material'; id: string } | { kind: 'triggers' } | { kind: 'audit' } | { kind: 'settings' } | { kind: 'service' } | { kind: 'rag' }
 
 // Оффер тестовой регистрации (НЕ для продуктива): состояние + допустимые роли
 interface TestOffer {
@@ -37,6 +38,7 @@ const NAV = [
   { kind: 'audit', label: 'Журнал аудита', icon: '🛡️', superOnly: true },
   { kind: 'settings', label: 'Параметры системы', icon: '⚙️', superOnly: true },
   { kind: 'service', label: 'Служебный раздел', icon: '🧰', superOnly: true },
+  { kind: 'rag', label: 'RAG — векторный поиск', icon: '🧠', superOnly: true },
 ] as const
 
 // Инициалы для аватара: «Иван Иванов» → «ИИ»
@@ -291,6 +293,9 @@ export default function App() {
           {view.kind === 'audit' && <AuditLog />}
           {view.kind === 'settings' && <SystemSettings />}
           {view.kind === 'service' && <ServiceDesk />}
+          {view.kind === 'rag' && (
+            <RagAdmin onOpenMaterial={(id) => setView({ kind: 'material', id })} />
+          )}
           {view.kind === 'search' && (
             <SearchView initialQuery={view.q} onOpenMaterial={(id) => setView({ kind: 'material', id })} />
           )}

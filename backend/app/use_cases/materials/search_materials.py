@@ -55,10 +55,22 @@ def search_materials(
     log_event: bool = True,
 ) -> dict:
     """Поиск материалов (US-034/035/036): предикат прав + FTS/trgm + фильтры."""
+    if search_type in ("vector", "hybrid"):
+        # Пост-MVP шаг [7] ч.3 (RAG_DESIGN §7.1-1, FR-133): векторное/
+        # гибридное ранжирование; выдача — материалы (как в fulltext).
+        return _vector_search(
+            db, user,
+            q=q, search_type=search_type,
+            group_id=group_id, include_subgroups=include_subgroups,
+            type_id=type_id, status=status, author_id=author_id,
+            include_archive=include_archive, master_filter=master_filter,
+            page=page, per_page=per_page,
+            attribute_filters=attribute_filters, tag_ids=tag_ids,
+            log_event=log_event,
+        )
     if search_type != "fulltext":
-        # FR-133: vector/hybrid зарезервированы (§12.2 NOT_IMPLEMENTED)
-        raise DomainError(status=400, code="NOT_IMPLEMENTED", title="Не реализовано",
-                          detail="На MVP доступен только полнотекстовый поиск (search_type=fulltext)")
+        raise DomainError(status=400, code="VALIDATION_ERROR", title="Ошибка валидации запроса",
+                          detail="search_type — 'fulltext' | 'vector' | 'hybrid'")
     q = (q or "").strip()
     if len(q) > MAX_Q_LEN:
         raise DomainError(status=400, code="VALIDATION_ERROR", title="Ошибка валидации запроса",
@@ -412,3 +424,154 @@ def _setting(db: Session, key: str, default):
     from app.use_cases.admin.settings import get_settings_value
 
     return get_settings_value(db, key, default)
+
+
+# ==========================================================================
+# Пост-MVP шаг [7] ч.3 (RAG_DESIGN §7.1-1, FR-133): search_type=vector|hybrid —
+# векторное/гибридное ранжирование, выдача — материалы (как в fulltext).
+# ==========================================================================
+
+def _vector_search(
+    db: Session,
+    user,
+    *,
+    q: str | None,
+    search_type: str,
+    group_id: str | None,
+    include_subgroups: bool,
+    type_id: str | None,
+    status: str | None,
+    author_id: str | None,
+    include_archive: bool,
+    master_filter: str | None,
+    page: int,
+    per_page: int | None,
+    attribute_filters: list[dict] | None,
+    tag_ids: list[str] | None,
+    log_event: bool,
+) -> dict:
+    """Поиск материалов, ранжированный по чанкам (вектор) или RRF (гибрид).
+
+    Материальные фильтры и права — как в fulltext (один предикат §3.2);
+    порядок материалов — по лучшему чанку (дедуп §9-4) / RRF-слиянию.
+    Конвейер RAG off → 409 (честная ошибка вместо тихого фолбэка — §7.1-1).
+    """
+    from app.use_cases.rag import retrieve as rag_ret
+
+    q = rag_ret._validate_query(q)
+    page = max(1, int(page or 1))
+    if per_page:
+        per_page = min(200, max(1, int(per_page)))
+    else:
+        per_page = 50
+        try:
+            from app.use_cases.admin.settings import get_settings_value
+
+            per_page = int(get_settings_value(db, "page_size", 50) or 50)
+        except Exception:
+            pass
+        per_page = min(200, max(1, per_page))
+
+    # Фильтр группы §7.2 — та же валидация, что у /rag/retrieve
+    group_path, group_exact = rag_ret._group_filter(db, group_id, include_subgroups)
+
+    # Вектор запроса (409/502 при off/сбое — §7.1-1)
+    vec_literal = rag_ret._query_vector(db, q)
+
+    M, MG = models.Material, models.Group
+    from app.use_cases.permissions.list_predicate import visible_materials_condition
+
+    perm = visible_materials_condition(user, "view", M, MG)
+
+    # Базовые материальные условия: права + фильтры (FR-112/115/116/120)
+    m_conds = [M.is_deleted.is_(False)]
+    if not include_archive:
+        m_conds.append(M.status != models.MaterialStatus.archived)
+    if group_path is not None:
+        m_conds.append(MG.path.like(group_path + "%"))
+    if group_exact is not None:
+        m_conds.append(M.group_id == group_exact)
+    if type_id:
+        m_conds.append(M.type_id == __import__("uuid").UUID(type_id))
+    if status:
+        m_conds.append(M.status == status)
+    if author_id:
+        m_conds.append(M.author_id == __import__("uuid").UUID(author_id))
+    if master_filter == "masters":
+        m_conds.append(M.master_id.is_(None))
+    elif master_filter == "children":
+        m_conds.append(M.master_id.is_not(None))
+
+    # Атрибутные/теговые фильтры — та же логика, что в fulltext (§7.3)
+    extra: list = []
+    if attribute_filters:
+        for f in attribute_filters:
+            extra.append(_apply_attribute_filter(db, select(M), M, f))
+    if tag_ids:
+        T = models.MaterialTag
+        extra.append(select(M.id).join(T, T.material_id == M.id).where(T.tag_id.in_(tag_ids)))
+
+    # --- Поток ранжирования: векторный (лучший чанк материала) ---
+    vec_rows = rag_ret.best_chunks_per_material(
+        db, user, vec_literal=vec_literal,
+        group_path=group_path, group_exact=group_exact,
+        # без limit: дедуп всех видимых материалов для сортировки+пагинации
+        limit=100000,
+    )
+    order_by_material = {r.material_id: i for i, r in enumerate(vec_rows)}
+
+    if search_type == "hybrid":
+        fts = rag_ret._fts_candidates(db, user, q, group_path, group_exact, 200)
+        fts_order = {mid: i for i, (mid, _rk) in enumerate(fts)}
+    else:
+        fts_order = {}
+
+    # Ранг материала: min порядок в потоках → RRF-скор (§9-3) или чистый вектор
+    def _rank(mid) -> float:
+        vr = order_by_material.get(mid)
+        fr = fts_order.get(mid)
+        if search_type == "hybrid":
+            s = 0.0
+            if vr is not None:
+                s += 1.0 / (rag_ret.RRF_K + vr + 1)
+            if fr is not None:
+                s += 1.0 / (rag_ret.RRF_K + fr + 1)
+            return s
+        # vector: дистанция лучшего чанка (меньше — лучше) → score 1-d
+        row = vec_rows[vr] if vr is not None else None
+        return 1.0 - float(row.dist) if row is not None else -1.0
+
+    # Кандидаты: материалы, подходящие под фильтры и права; сортировка — ранг
+    stmt = select(M).join(MG, MG.id == M.group_id).where(*m_conds, perm)
+    for e in extra:
+        stmt = stmt.where(M.id.in_(e.scalar_subquery()))
+    # master_filter 'masters'|'children' уже в m_conds
+
+    candidates = db.execute(stmt.order_by(M.updated_at.desc().nullslast(), M.id)).scalars().all()
+    candidates.sort(key=_rank, reverse=True)
+
+    total = len(candidates)
+    rows = candidates[(page - 1) * per_page: page * per_page]
+
+    items = [to_list_item(m) for m in rows]
+
+    # Аналитика (§7.6, FR-127)
+    event_id = None
+    if log_event:
+        from app.use_cases.materials.search_materials import normalize_query
+
+        ev = models.SearchEvent(query_normalized=normalize_query(q), result_count=total)
+        db.add(ev)
+        db.flush()
+        event_id = str(ev.id)
+        db.commit()
+
+    return {
+        "items": items,
+        "groups": [],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "query": q,
+        "search_event_id": event_id,
+    }

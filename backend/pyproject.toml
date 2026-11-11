@@ -20,6 +20,7 @@ dependencies = [
     "python-multipart>=0.0.20",
     "structlog>=25.8",
     "boto3>=1.36",
+    "mcp>=2.3.0",
 ]
 
 [dependency-groups]
@@ -32,3 +33,4 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+pythonpath = ["."]

@@ -36,6 +36,12 @@ EDITABLE_KEYS = {
     "smtp_port": int,
     "smtp_from": str,
     "smtp_use_tls": bool,
+    # Пост-MVP шаг [7] (RAG_DESIGN §3.1): системный уровень конфигурации RAG.
+    # base_url/api_key/model — env (KB_RAG_*), не реестр: секреты и связь
+    # с размерностью столбца — вне БД (§3.1, §6).
+    "rag.enabled": bool,
+    "rag.default_chunker": str,
+    "rag.default_params": dict,
 }
 
 SMTP_KEYS = {"smtp_host", "smtp_port", "smtp_from", "smtp_use_tls"}
@@ -101,6 +107,15 @@ def update_setting(db: Session, actor: models.User, is_super: bool, key: str, va
         not isinstance(value, int) or value < 5
     ):
         raise _validation_error("Интервал дайджеста — целое ≥ 5 минут")
+    if key == "rag.default_chunker":
+        from app.rag import available_chunkers
+
+        if value not in available_chunkers():
+            raise _validation_error(
+                f"Неизвестный чанкер {value!r}; доступные: {', '.join(available_chunkers())}"
+            )
+    if key == "rag.enabled" and value not in (True, False):
+        raise _validation_error("Значение должно быть true|false")
 
     row = db.execute(
         select(models.SystemSetting).where(models.SystemSetting.key == key)

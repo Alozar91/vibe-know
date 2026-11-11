@@ -39,6 +39,20 @@ class Settings(BaseSettings):
     # Тестовая регистрация с выбором роли (НЕ для продуктива): по умолчанию выключена.
     test_registration: bool = False
 
+    # RAG (пост-MVP шаг [7], RAG_DESIGN §6): OpenAI-совместимый /v1/embeddings.
+    # base_url — без /v1 на конце (клиент добавляет сам); api_key пустой —
+    # RAG-конвейер в «off» (задачи не эмбеддят, хуки не ставят pending).
+    rag_embedding_base_url: str = ""
+    rag_embedding_api_key: str = ""
+    rag_embedding_model: str = "text-embedding-3-small"
+    rag_embedding_dim: int = 1536
+    rag_embedding_timeout: float = 30.0
+    rag_embedding_batch: int = 32  # чанков в одном запросе (§6: 32–64)
+
+    # MCP-сервер (пост-MVP шаг [7] ч.5, RAG_DESIGN §8-5): read-only тулы
+    # kb_search/kb_groups на /api/v1/mcp. По умолчанию включён; 0/false — off.
+    mcp_enabled: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

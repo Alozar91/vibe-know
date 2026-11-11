@@ -42,6 +42,11 @@ def make_celery() -> Celery:
                 "task": "maintenance.daily",
                 "schedule": 86400.0,
             },
+            # Пост-MVP шаг [7] (RAG_DESIGN §5): свёрка отставших индексаций
+            "rag-reconcile": {
+                "task": "rag.reconcile",
+                "schedule": 3600.0,
+            },
         },
     )
     return app

@@ -355,6 +355,30 @@ class FileObject(TimestampMixin, Base):
     )
 
 
+class FileText(TimestampMixin, Base):
+    """file_texts (16.1-121, LLD §2.2, шаг [8]): кэш извлечённого текста по файлу.
+
+    Ключ — file_id (sha256 уже в file_objects); кэш по sha256: повторная загрузка
+    того же файла извлечения не требует (§6.3). state: pending/ready/failed;
+    отказ не блокирует материал (как FR-060). Участвует в FTS (вес D, §7.1),
+    ILIKE (§7.3), RAG-чанках (§7.7) при state='ready' и ref_count > 0.
+    """
+
+    __tablename__ = "file_texts"
+
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("file_objects.id", ondelete="CASCADE"), primary_key=True
+    )
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", server_default="pending")
+    text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extractor: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_file_texts_state", "state"),
+    )
+
+
 class Material(TimestampMixin, Base):
     """materials (4.2, FR-024–028): одна группа, статус, версия = ETag (FR-093–095)."""
 
@@ -620,6 +644,7 @@ class TaskType(str, enum.Enum):
 
     antivirus = "antivirus"
     conversion = "conversion"
+    extraction = "extraction"  # 16.1-121, шаг [8]: files.extract
     email = "email"
     digest = "digest"
     audit_cleanup = "audit_cleanup"

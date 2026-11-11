@@ -39,6 +39,11 @@ def pdf_key(sha256_hex: str) -> str:
     return f"pdf/{sha256_hex}"
 
 
+def text_key(sha256_hex: str) -> str:
+    """Ключ кэша извлечённого текста: text/<hex> (16.1-121, §6.3; перезаписываемый)."""
+    return f"text/{sha256_hex}"
+
+
 def put_object(key: str, data: bytes, content_type: str | None = None) -> None:
     """PUT в bucket cas; идемпотентен для неизменяемых CAS-объектов (§6.1)."""
     kwargs = {"Bucket": get_settings().s3_bucket, "Key": key, "Body": data}

@@ -174,16 +174,27 @@ def index_material(db: Session, material_id, client: EmbeddingClient | None = No
 
 
 def _version_text(db: Session, ver: models.MaterialVersion) -> str | None:
-    """Текст чанкования (§5-2): text_content материала; fallback — снапшот версии.
+    """Текст чанкования (§5-2, 16.1-121): текстовое представление И извлечённый
+    текст файла — объединение (приоритет авторского описания — первым).
 
-    Снапшот (FR-144) хранит name/text/type_id/attributes/tags; текст
-    документа — materials.text_content (Markdown, 16.1-4).
+    Описание: text_content материала; fallback — снапшот версии (FR-144).
+    Извлечённый текст: file_texts текущего файла (state='ready', §6.3);
+    не готов / не удалось — только описание. Оба пусты → None.
     """
     m = db.get(models.Material, ver.material_id)
-    if m is not None and m.text_content:
-        return m.text_content
-    snap = ver.snapshot or {}
-    return snap.get("text") or None
+    parts: list[str] = []
+    if m is not None:
+        if m.text_content:
+            parts.append(m.text_content)
+        else:
+            snap = ver.snapshot or {}
+            if snap.get("text"):
+                parts.append(snap["text"])
+        if m.current_file_id is not None:
+            ft = db.get(models.FileText, m.current_file_id)
+            if ft is not None and ft.state == "ready" and ft.text:
+                parts.append(ft.text)
+    return "\n\n".join(parts) or None
 
 
 def _settings():

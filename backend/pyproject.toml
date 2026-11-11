@@ -21,6 +21,10 @@ dependencies = [
     "structlog>=25.8",
     "boto3>=1.36",
     "mcp>=2.3.0",
+    # 16.1-121, шаг [8]: извлечение текста файлов (docx/xlsx/pptx/pdf).
+    # Ветка 0.0.x: единственная без magika→onnxruntime (нет колёс cp315,
+    # python:3.15-slim и локальный 3.15.2); API convert() по файлу на диске.
+    "markitdown==0.0.2",
 ]
 
 [dependency-groups]

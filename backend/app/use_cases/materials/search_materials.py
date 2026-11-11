@@ -27,6 +27,17 @@ def _is_pg(db: Session) -> bool:
     return db.bind is not None and db.bind.dialect.name == "postgresql"
 
 
+def _file_text_ilike(q: str) -> Any:
+    """Извлечённый текст файла как источник ILIKE (16.1-121, §7.3): EXISTS
+    к file_texts по текущему файлу материала (state='ready')."""
+    FT = models.FileText
+    return select(func.count()).select_from(FT).where(
+        FT.file_id == models.Material.current_file_id,
+        FT.state == "ready",
+        FT.text.ilike(f"%{q}%"),
+    ).correlate(models.Material).scalar_subquery() > 0
+
+
 def normalize_query(q: str | None) -> str:
     """Нормализация для search_events (§7.6): lower, trim."""
     return (q or "").strip().lower()[:MAX_Q_LEN]
@@ -143,12 +154,17 @@ def search_materials(
                 conds = [M.name.ilike(f"%{q}%"), M.text_content.ilike(f"%{q}%")]
                 if len(q) >= short_len:
                     conds.append(M.name.op("%")(q))
+                # Извлечённый текст файла (16.1-121, §7.3): третий источник ILIKE
+                # через EXISTS к file_texts (длинные тексты — только ILIKE,
+                # по той же причине, что в №36 — similarity недостижима)
+                conds.append(_file_text_ilike(q))
                 text_conds.append(or_(*conds))
         else:
             # SQLite: ILIKE-ветка (контракт/права; FTS-семантика — на живом стеке)
             text_conds.append(M.name.ilike(f"%{q}%"))
             if partial:
-                text_conds.append(M.text_content.ilike(f"%{q}%"))
+                conds = [M.text_content.ilike(f"%{q}%"), _file_text_ilike(q)]
+                text_conds.append(or_(*conds))
     if text_conds:
         stmt = stmt.where(or_(*text_conds))
 

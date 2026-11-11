@@ -15,13 +15,14 @@ from app.db import models
 from app.db.engine import get_session_factory
 from app.logging import get_logger
 from app.use_cases.files import silo
-from app.use_cases.files.mime_detect import is_office_mime
+from app.use_cases.files.mime_detect import is_extractable_mime, is_office_mime
 from app.worker import celery_app
 log = get_logger(__name__)
 
 # Ретраи по LLD §9
 SCAN_MAX_RETRIES = 5
 CONVERT_MAX_RETRIES = 3
+EXTRACT_MAX_RETRIES = 3  # 16.1-121, шаг [8] (LLD §9)
 CONVERT_TIMEOUT_S = 600  # 10 минут (NFR-006)
 KEYCLOAK_SYNC_PAGE = 100  # страницы Admin API (LLD §10, [уточнение LLD])
 
@@ -90,6 +91,9 @@ def files_scan(self, task_id: str, file_id: str) -> dict:
         if fo.scan_state == "ready":
             # Офисный mime → files.convert (§6.3); пост-обработка после commit
             _maybe_convert(fo)
+            # Извлекаемый mime (DOCX/XLSX/PPTX/PDF) → files.extract
+            # (16.1-121, шаг [8], параллельно конвертации — §6.3)
+            _maybe_extract(fo)
         else:
             # Прямое уведомление file_blocked (FR-058, LLD §8.1): вне триггеров,
             # получатели — автор материала + все СА; инициатор — система
@@ -264,6 +268,181 @@ def _maybe_convert(fo: models.FileObject) -> None:
         files_convert.apply_async(args=[str(task.id), str(fo.id)])
 
 
+# ==========================================================================
+# Пост-MVP шаг [8]: извлечение текста файлов (16.1-121, LLD §6.3, §9)
+# ==========================================================================
+
+@celery_app.task(bind=True, name="files.extract", max_retries=EXTRACT_MAX_RETRIES)
+def files_extract(self, task_id: str, file_id: str) -> dict:
+    """Извлечение текста файла (16.1-121, FR-154): DOCX/XLSX/PPTX/PDF →
+    MarkItDown → Markdown → S3 PUT text/<hex> + upsert file_texts.
+
+    Идемпотентен (upsert по file_id, PUT перезаписью); кэш по sha256 —
+    повторная загрузка того же файла извлечения не требует (§6.3).
+    Отказ (повреждённый документ, отсутствие текстового слоя) →
+    file_texts.state='failed', материал не блокируется (как FR-060):
+    поиск по содержимому недоступен, по названию/описанию работает.
+    По готовности — FTS-хук (§7.1) + RAG-pending (§7.7) по всем материалам
+    с привязкой к файлу (ref_count > 0).
+    """
+    db = get_session_factory()()
+    try:
+        db.execute(
+            update(models.SystemTask)
+            .where(models.SystemTask.id == _uuid(task_id))
+            .values(state="running", started_at=_now(),
+                    attempts=models.SystemTask.attempts + 1)
+        )
+        fo = _file(db, file_id)
+        if fo is None:
+            db.rollback()
+            return {"file_id": file_id, "result": "missing"}
+
+        ft = db.get(models.FileText, fo.id)
+        if ft is None:
+            ft = models.FileText(file_id=fo.id, state="pending")
+            db.add(ft)
+        ft.state = "pending"
+        ft.error = None
+        db.commit()
+
+        from app.config import get_settings
+
+        text = _extract_text(get_settings(), fo)
+
+        silo.put_object(silo.text_key(fo.sha256), text.encode("utf-8"),
+                        content_type="text/markdown")
+        ft.state = "ready"
+        ft.text = text
+        ft.extractor = "markitdown-0.0.2"
+        db.execute(
+            update(models.SystemTask)
+            .where(models.SystemTask.id == _uuid(task_id))
+            .values(state="done", finished_at=_now())
+        )
+        db.commit()
+
+        _after_extract(fo)
+        return {"file_id": file_id, "result": "ready", "chars": len(text)}
+    except Exception as e:
+        db.rollback()
+        try_count = self.request.retries + 1
+        if try_count <= EXTRACT_MAX_RETRIES:
+            _mark(task_id, state="queued",
+                  last_error=f"{type(e).__name__}: {e}")
+            raise self.retry(exc=e, countdown=30 * (2 ** (try_count - 1)))
+        # Исчерпали ретраи: failed (материал не блокируется, как FR-060)
+        try:
+            db = db if not db.closed else get_session_factory()()
+        except Exception:  # noqa: BLE001
+            db = get_session_factory()()
+        try:
+            fo = _file(db, file_id)
+            if fo is not None:
+                ft = db.get(models.FileText, fo.id)
+                if ft is None:
+                    ft = models.FileText(file_id=fo.id, state="pending")
+                    db.add(ft)
+                ft.state = "failed"
+                ft.error = f"{type(e).__name__}: {e}"[:2000]
+                db.commit()
+        except Exception:  # noqa: BLE001 — не маскировать исходный сбой
+            db.rollback()
+        _mark(task_id, state="failed", finished_at=_now(),
+              last_error=f"{type(e).__name__}: {e}")
+        log.error("files.extract.failed", file_id=file_id, error=str(e))
+        return {"file_id": file_id, "result": "failed", "error": str(e)}
+    finally:
+        db.close()
+
+
+def _extract_text(settings, fo: models.FileObject) -> str:
+    """MarkItDown (16.1-121): формат текстового представления — Markdown (16.1-4).
+
+    Ветка 0.0.x — единственная без magika→onnxruntime (нет колёс cp315);
+    API — convert() по пути файла: объект silo скачивается во временный файл
+    (расширение имени — подсказка формата конвертеру).
+    Пустой результат (документ без текстового слоя — скан) — тоже ошибка
+    извлечения: индексировать нечего, state='failed'.
+    """
+    import os
+    import tempfile
+
+    from markitdown import MarkItDown
+
+    body, _st, _h = silo.get_object_stream(silo.cas_key(fo.sha256))
+    if body is None:
+        raise RuntimeError("исходник отсутствует в silo")
+    try:
+        data = body.read()
+    finally:
+        body.close()
+
+    ext = os.path.splitext(fo.filename)[1] or ""
+    fd, path = tempfile.mkstemp(suffix=ext)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        result = MarkItDown().convert(path)
+        text = (result.text_content or "").strip()
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    if not text:
+        raise ValueError("документ не содержит текстового слоя (пустой результат извлечения)")
+    return text
+
+
+def _after_extract(fo: models.FileObject) -> None:
+    """По готовности извлечения (16.1-121, §7.1/§7.7): пересчёт FTS + RAG-pending
+    всех материалов, привязанных к файлу (ref_count > 0), — тот же хук, что при
+    правке текста. Постановка в брокер — после коммита."""
+    from app.rag.indexing import flush_rag_enqueue, hook_after_change
+    from app.use_cases.materials.search_common import update_search_vector
+
+    db = get_session_factory()()
+    try:
+        mats = db.execute(
+            select(models.Material).where(
+                models.Material.current_file_id == fo.id,
+                models.Material.is_deleted == False,  # noqa: E712
+            )
+        ).scalars().all()
+        for m in mats:
+            update_search_vector(db, m)
+            hook_after_change(db, m)
+        db.commit()
+        # Постановка в брокер после коммита (пара к hook_after_change);
+        # читает db._pending_rag_refs — до закрытия сессии
+        flush_rag_enqueue(db)
+    finally:
+        db.close()
+
+
+def _maybe_extract(fo: models.FileObject) -> None:
+    """scan_state='ready' + извлекаемый mime → постановка files.extract (§6.3).
+
+    Кэш по sha256: у файла уже есть готовое извлечение — повтор не требуется
+    (CAS-объекты неизменяемы, text/<hex> валиден для того же содержимого).
+    """
+    if not is_extractable_mime(fo.mime_type):
+        return
+    with get_session_factory()() as db:
+        existing = db.get(models.FileText, fo.id)
+        if existing is not None and existing.state == "ready":
+            return
+        task = models.SystemTask(
+            task_type="extraction", object_type="file", object_id=fo.id, state="queued"
+        )
+        db.add(task)
+        db.commit()
+        from app.worker.tasks import files_extract
+
+        files_extract.apply_async(args=[str(task.id), str(fo.id)])
+
+
 # --- Reconcile очереди из БД при старте worker (LLD §9): задачи в queued
 # перезапускаются; обработчики остальных этапов добавляются в STARTUP_TASKS.
 @celery_app.task(name="files.reconcile")
@@ -274,7 +453,7 @@ def files_reconcile() -> dict:
         rows = db.execute(
             select(models.SystemTask).where(
                 models.SystemTask.state == "queued",
-                models.SystemTask.task_type.in_(["antivirus", "conversion"]),
+                models.SystemTask.task_type.in_(["antivirus", "conversion", "extraction"]),
             )
         ).scalars().all()
         for t in rows:
@@ -282,6 +461,8 @@ def files_reconcile() -> dict:
                 files_scan.apply_async(args=[str(t.id), str(t.object_id)])
             elif t.task_type == "conversion":
                 files_convert.apply_async(args=[str(t.id), str(t.object_id)])
+            elif t.task_type == "extraction":
+                files_extract.apply_async(args=[str(t.id), str(t.object_id)])
             restarted += 1
     return {"restarted": restarted}
 

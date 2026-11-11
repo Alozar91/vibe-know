@@ -94,6 +94,9 @@ def build_tsv_sql_expr(cfg: str):
 
     Возвращает SQLAlchemy-выражение над materials (алиас не нужен —
     коррелированные подзапросы по material_id = m.id).
+    Вес D (16.1-121, шаг [8]) — извлечённый текст файла: текущий файл
+    материала из кэша file_texts (state='ready'); файла нет / извлечение
+    не готово или не удалось — вклад пуст.
     """
     from sqlalchemy import text as sa_text
 
@@ -117,6 +120,13 @@ def build_tsv_sql_expr(cfg: str):
             WHERE mt.material_id = materials.id
         ), '')), 'B')
         || setweight(to_tsvector('{cfg}', coalesce(materials.text_content, '')), 'C')
+        || setweight(to_tsvector('{cfg}', coalesce((
+            SELECT ft.text
+            FROM file_texts ft
+            JOIN file_objects fo ON fo.id = ft.file_id
+            WHERE materials.current_file_id = fo.id
+              AND ft.state = 'ready'
+        ), '')), 'D')
     """)
 
 

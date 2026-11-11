@@ -4,7 +4,7 @@
 import uuid
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.db import models
 
@@ -355,14 +355,25 @@ class TestRetrieveAPI:
         assert r.status_code == 400  # Field le=20 → RequestValidationError → 400
 
     def test_search_type_vector_endpoint(self, db, client, rag_query_on):
+        """Vector-выдача: только материалы с чанками (дефект 11.11.2026:
+        материал без чанков раньше попадал в выдачу с рангом −1 — без score)."""
         u = db.execute(select(models.User).where(
             models.User.display_name == "Тестовый СА")).scalar_one()
         g = _make_group(db)
-        _material(db, g, u, "Регламент API-паркета", "Паркетный текст. " * 40)
+        m_idx = _material(db, g, u, "Регламент API-паркета", "Паркетный текст. " * 40)
+        m_no = _material(db, g, u, "Паркетный документ без текста", "")
+        # m_no: без текста → «indexed, 0 чанков» (как docx без текстового представления)
+        db.execute(delete(models.RagChunk).where(models.RagChunk.material_id == m_no.id))
+        _index(db, m_idx)
         r = client.get("/api/v1/search", params={
             "q": "паркетный", "search_type": "vector"})
         assert r.status_code == 200
-        assert r.json()["total"] >= 1
+        body = r.json()
+        ids = [i["id"] for i in body["items"]]
+        assert str(m_idx.id) in ids
+        assert str(m_no.id) not in ids  # без чанков — в vector не показывается
+        hit = next(i for i in body["items"] if i["id"] == str(m_idx.id))
+        assert isinstance(hit["score"], (int, float))
 
     def test_search_type_bad_400(self, db, client):
         r = client.get("/api/v1/search", params={"q": "x", "search_type": "bm25"})

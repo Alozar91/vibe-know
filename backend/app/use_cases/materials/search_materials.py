@@ -518,58 +518,64 @@ def _vector_search(
         # без limit: дедуп всех видимых материалов для сортировки+пагинации
         limit=100000,
     )
-    order_by_material = {r.material_id: i for i, r in enumerate(vec_rows)}
+    # (порядок vec_rows — по дистанции; индексы в ranks строятся прямо из него)
 
+    fts: list = []
     if search_type == "hybrid":
         fts = rag_ret._fts_candidates(db, user, q, group_path, group_exact, 200)
-        fts_order = {mid: i for i, (mid, _rk) in enumerate(fts)}
-    else:
-        fts_order = {}
+    fts_pos = {mid: i for i, (mid, _rk) in enumerate(fts)}
 
-    # Ранг материала: min порядок в потоках → RRF-скор (§9-3) или чистый вектор
-    def _rank(mid) -> float:
-        vr = order_by_material.get(mid)
-        fr = fts_order.get(mid)
-        if search_type == "hybrid":
-            s = 0.0
-            if vr is not None:
-                s += 1.0 / (rag_ret.RRF_K + vr + 1)
-            if fr is not None:
-                s += 1.0 / (rag_ret.RRF_K + fr + 1)
-            return s
-        # vector: дистанция лучшего чанка (меньше — лучше) → score 1-d
-        row = vec_rows[vr] if vr is not None else None
-        return 1.0 - float(row.dist) if row is not None else -1.0
-
-    # Скор для UI (§7.7): vector — косинусная близость лучшего чанка (1-d, 0..1);
-    # hybrid — RRF-скор Σ1/(60+rank) (потолок 2/(60+1) ≈ 0.0328; сопоставим
-    # только внутри одной выдачи). Кандидат без чанков (FTS-only) — score нет.
-    # Ключи — str(id): элементы выдачи несут строковый id (to_list_item).
+    # Ранг и скор — единый расчёт по потокам (§9-3, §7.7). Ключи — str(id):
+    # элементы выдачи несут строковый id (to_list_item).
+    # vector — только материалы с чанками (кандидат без чанков запросу
+    # не соответствует вовсе: векторного совпадения нет; раньше он получал
+    # ранг −1 и попадал в выдачу, а при малой выдаче — на первые строки
+    # без score, дефект сопровождения 11.11.2026); скор = близость 1−d.
+    # hybrid — RRF Σ1/(60+rank) по обоим потокам; кандидат, попавший только
+    # в FTS-поток, показывается с FTS-вкладом (поле score ему положено).
     # SQLite-заглушка дистанции (len(content)) семантики близости не несёт —
-    # 1-d уходит минус-бесконечности: клампим 0..1 (сортировка на SQLite не
-    # меняется — порядок задаёт _rank по сырой дистанции, не клампнутый score)
-    scores: dict = {}
+    # 1-d клампится 0..1 (порядок в vector задаёт сырая дистанция в vec_rows,
+    # не клампнутый скор).
+    ranks: dict = {}
     if search_type == "vector":
         for i, r in enumerate(vec_rows):
-            scores[str(r.material_id)] = round(max(0.0, min(1.0, 1.0 - float(r.dist))), 4)
+            ranks[str(r.material_id)] = round(max(0.0, min(1.0, 1.0 - float(r.dist))), 4)
     else:  # hybrid
+        R = rag_ret.RRF_K
         for i, r in enumerate(vec_rows):
-            scores[str(r.material_id)] = round(1.0 / (rag_ret.RRF_K + i + 1), 6)
+            mid = str(r.material_id)
+            s = 1.0 / (R + i + 1)
+            if mid in fts_pos:
+                s += 1.0 / (R + fts_pos[mid] + 1)
+            ranks[mid] = round(s, 6)
         for i, (mid, _rk) in enumerate(fts):
-            if mid in scores:
-                scores[str(mid)] = round(scores[str(mid)] + 1.0 / (rag_ret.RRF_K + i + 1), 6)
+            ranks.setdefault(str(mid), round(1.0 / (R + i + 1), 6))
+    scores = ranks
 
-    # Кандидаты: материалы, подходящие под фильтры и права; сортировка — ранг
+    # Кандидаты: hybrid — все подходящие под фильтры и права (FTS-поток
+    # легитимен для материалов без чанков); vector — только материалы с чанками
+    # (кандидат без векторного совпадения запросу не соответствует).
     stmt = select(M).join(MG, MG.id == M.group_id).where(*m_conds, perm)
     for e in extra:
         stmt = stmt.where(M.id.in_(e.scalar_subquery()))
-    # master_filter 'masters'|'children' уже в m_conds
 
-    candidates = db.execute(stmt.order_by(M.updated_at.desc().nullslast(), M.id)).scalars().all()
-    candidates.sort(key=_rank, reverse=True)
-
-    total = len(candidates)
-    rows = candidates[(page - 1) * per_page: page * per_page]
+    if search_type == "vector":
+        # Порядок и состав — целиком из векторного потока (vec_rows уже с правами
+        # и фильтром группы); прочие материальные фильтры (атрибуты/теги/тип/статус)
+        # — постфильтр тем же stmt (права + m_conds + extra)
+        allowed = set(db.execute(stmt.with_only_columns(M.id)).scalars().all())
+        by_id = {m.id: m for m in db.execute(
+            select(M).where(M.id.in_([r.material_id for r in vec_rows]))
+        ).scalars().all()}
+        candidates = [by_id[r.material_id] for r in vec_rows
+                      if r.material_id in allowed and r.material_id in by_id]
+        total = len(candidates)
+        rows = candidates[(page - 1) * per_page: page * per_page]
+    else:
+        candidates = db.execute(stmt.order_by(M.updated_at.desc().nullslast(), M.id)).scalars().all()
+        candidates.sort(key=lambda m: -ranks.get(str(m.id), 0.0))
+        total = len(candidates)
+        rows = candidates[(page - 1) * per_page: page * per_page]
 
     items = [to_list_item(m) for m in rows]
     # Релевантность в UI (§7.7): score — для vector/hybrid (fulltext не отдаёт:

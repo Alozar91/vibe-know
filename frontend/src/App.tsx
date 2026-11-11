@@ -282,7 +282,7 @@ export default function App() {
 
         <main className="content">
           {view.kind === 'browser' && (
-            <MaterialsBrowser onOpenMaterial={(id) => setView({ kind: 'material', id })} refreshToken={refreshToken} />
+            <MaterialsBrowser onOpenMaterial={(id) => setView({ kind: 'material', id })} refreshToken={refreshToken} isSuper={!!me?.is_super} />
           )}
           {view.kind === 'sections' && (
             <Sections onOpenMaterial={(id) => setView({ kind: 'material', id })} refreshToken={refreshToken} />

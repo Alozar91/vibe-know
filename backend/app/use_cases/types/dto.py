@@ -14,6 +14,9 @@ def to_out(t: models.MaterialType) -> dict:
                 "is_multivalue": b.attribute.is_multivalue,
                 "is_required": b.attribute.is_required,
                 "display_order": b.attribute.display_order,
+                # dictionary-атрибуты: фронт по dictionary_id подтягивает
+                # значения справочника (GET /dictionaries) для select'а
+                "dictionary_id": str(b.attribute.dictionary_id) if b.attribute.dictionary_id else None,
             }
             for b in sorted(t.bindings, key=lambda x: x.attribute.display_order)
         ],

@@ -24,6 +24,19 @@ export interface GroupNode {
 export interface MaterialType {
   id: string
   name: string
+  /** Атрибуты типа (GET /types, FR-043); dictionary-атрибут несёт dictionary_id. */
+  attributes?: TypeAttr[]
+}
+
+/** Атрибут типа материала (FR-044) — для форм создания/редактирования. */
+export interface TypeAttr {
+  id: string
+  name: string
+  value_type: 'string' | 'number' | 'date' | 'url' | 'dictionary'
+  is_multivalue: boolean
+  is_required: boolean
+  display_order: number
+  dictionary_id?: string | null
 }
 
 export interface Material {

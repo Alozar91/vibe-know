@@ -486,5 +486,6 @@ textarea { resize: vertical; }
 details.summary-box > summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 8px 14px; }
 .checkrow { display: inline-flex; gap: 5px; align-items: center; margin-right: 12px; white-space: nowrap; font-size: 13px; }
 .formrow { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.tagopt { display: inline-flex; align-items: center; gap: 5px; font-size: 13.5px; }
 .searchhit { padding: 12px 4px; border-bottom: 1px solid var(--line); }
 .searchhit .hltext { font-size: 12.5px; color: var(--muted); margin-top: 3px; }

@@ -1,0 +1,195 @@
+/* ============================================================
+   Login-тема «kb» — оформление страниц входа/регистрации/сброса
+   пароля в палитре системы (frontend/src/styles.css):
+   акцент #0f62fe, фон #f7f8fa, панель #ffffff, линии #d9dde3,
+   радиусы 8/12px, тёмная шапка #16181d.
+   Родитель — keycloak.v2 (PatternFly v5); здесь только перекрытия.
+   ============================================================ */
+
+:root {
+    --kb-accent: #0f62fe;
+    --kb-accent2: #0043ce;
+    --kb-bg: #f7f8fa;
+    --kb-fg: #16181d;
+    --kb-muted: #5d6470;
+    --kb-panel: #ffffff;
+    --kb-panelhead: #eef0f3;
+    --kb-line: #d9dde3;
+    --kb-line-strong: #c6ccd6;
+    --kb-ring: rgba(15, 98, 254, .22);
+    --kb-radius: 8px;
+    --kb-radius-lg: 12px;
+    --kb-shadow: 0 1px 2px rgba(16, 19, 26, .05), 0 8px 28px rgba(16, 19, 26, .12);
+
+    /* Ссылки PatternFly → палитра системы */
+    --pf-v5-global--primary-color--100: var(--kb-accent);
+    --pf-v5-global--primary-color--200: var(--kb-accent2);
+    --pf-v5-global--primary-color--dark-100: var(--kb-accent);
+    --pf-v5-global--primary-color--dark-200: var(--kb-accent2);
+    --pf-v5-global--active-color--100: var(--kb-accent);
+    --pf-v5-global--active-color--200: var(--kb-ring);
+    --pf-v5-global--link--Color: var(--kb-accent);
+    --pf-v5-global--link--Color--hover: var(--kb-accent2);
+    --pf-v5-global--link--Color--visited: var(--kb-accent2);
+    --pf-v5-global--Color--100: var(--kb-fg);
+    --pf-v5-global--Color--200: var(--kb-muted);
+    --pf-v5-global--BackgroundColor--100: var(--kb-panel);
+    --pf-v5-global--BackgroundColor--150: var(--kb-panelhead);
+    --pf-v5-global--BackgroundColor--light-200: var(--kb-panelhead);
+    --pf-v5-global--BackgroundColor--200: var(--kb-bg);
+    --pf-v5-global--BackgroundColor--300: var(--kb-panelhead);
+    --pf-v5-global--BorderColor--100: var(--kb-line);
+    --pf-v5-global--BorderColor--200: var(--kb-line-strong);
+    --pf-v5-global--BorderColor--300: var(--kb-line-strong);
+    --pf-v5-global--BorderColor--dark-100: var(--kb-line);
+
+    /* Карточка входа: без цветной полосы сверху (кромку заменяет шапка-полоса) */
+    --keycloak-card-top-color: transparent;
+    /* Стандартный фон keycloak.v2 (тёмный keycloak-bg) не используется */
+    --keycloak-bg-logo-url: none;
+}
+
+/* ===== Фон страницы: светлый, как фон приложения ===== */
+.login-pf body,
+body#keycloak-bg {
+    background: var(--kb-bg);
+    height: 100%;
+}
+
+/* ===== Шапка: тёмная полоса, как topbar приложения ===== */
+.pf-v5-c-login__header {
+    background: #16181d;
+    padding: 14px 0;
+}
+
+/* Логотип: квадрат-«марка» 30×30 с «БЗ» + вордмарк (как .logo в SPA) */
+#kc-header-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: normal;
+    text-transform: none;
+    color: #f2f4f8 !important;
+    line-height: 30px;
+}
+
+#kc-header-wrapper::before {
+    content: "БЗ";
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: var(--kb-accent);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 800;
+    flex: none;
+}
+
+/* ===== Каркас: карточка по центру, ширина как в v2 (34rem) ===== */
+.pf-v5-c-login__container {
+    grid-template-columns: 34rem;
+}
+
+/* ===== Карточка: белая панель с радиусом и тенью системы ===== */
+.pf-v5-c-login__main {
+    background: var(--kb-panel);
+    border: 1px solid var(--kb-line);
+    border-radius: var(--kb-radius-lg);
+    box-shadow: var(--kb-shadow);
+}
+
+.pf-v5-c-login__main-header {
+    padding: 24px 40px 0;
+}
+
+.pf-v5-c-login__main-header .pf-v5-c-login__main-title {
+    color: var(--kb-fg);
+}
+
+.pf-v5-c-login__main-body {
+    padding: 24px 40px 32px;
+}
+
+/* ===== Поля ввода: как в системе (радиус 8, линия #c6ccd6, focus-ring) ===== */
+.pf-v5-c-form-control {
+    --pf-v5-c-form-control--BorderRadius: var(--kb-radius);
+    --pf-v5-c-form-control--BorderColor: var(--kb-line-strong);
+    --pf-v5-c-form-control--BackgroundColor: var(--kb-panel);
+}
+
+.pf-v5-c-form-control input,
+.pf-v5-c-form-control select,
+.pf-v5-c-form-control textarea {
+    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+.pf-v5-c-form-control:focus,
+.pf-v5-c-form-control:focus-within {
+    --pf-v5-c-form-control--BorderColor: var(--kb-accent);
+    outline: none;
+    box-shadow: 0 0 0 3px var(--kb-ring);
+}
+
+/* ===== Кнопки: акцент системы, радиус 8 ===== */
+.pf-v5-c-button {
+    --pf-v5-c-button--BorderRadius: var(--kb-radius);
+}
+
+.pf-v5-c-button.pf-m-primary {
+    --pf-v5-c-button--m-primary--BackgroundColor: var(--kb-accent);
+    --pf-v5-c-button--m-primary--hover--BackgroundColor: var(--kb-accent2);
+    --pf-v5-c-button--m-primary--focus--BackgroundColor: var(--kb-accent2);
+    --pf-v5-c-button--m-primary--active--BackgroundColor: var(--kb-accent2);
+}
+
+.pf-v5-c-button.pf-m-secondary,
+.pf-v5-c-button.pf-m-tertiary {
+    --pf-v5-c-button--m-secondary--BorderColor: var(--kb-line-strong);
+    --pf-v5-c-button--m-secondary--Color: var(--kb-fg);
+}
+
+.pf-v5-c-button.pf-m-link {
+    --pf-v5-c-button--m-link--Color: var(--kb-accent);
+    --pf-v5-c-button--m-link--hover--Color: var(--kb-accent2);
+}
+
+/* Кнопка «Войти» на всю ширину формы — как основное действие в системе */
+#kc-form-wrapper .pf-v5-c-button.pf-m-primary,
+.pf-v5-c-login__main-body .pf-v5-c-form-actions .pf-v5-c-button.pf-m-primary {
+    width: 100%;
+}
+
+/* ===== Ссылки ===== */
+a {
+    color: var(--kb-accent);
+}
+
+a:hover {
+    color: var(--kb-accent2);
+}
+
+/* ===== Метки полей ===== */
+.pf-v5-c-form__label-text {
+    color: var(--kb-fg);
+}
+
+/* ===== Сообщения (ошибки/успех/предупреждения) — смягчённые радиусы ===== */
+.pf-v5-c-alert {
+    --pf-v5-c-alert--BorderRadius: var(--kb-radius);
+    border: 1px solid var(--kb-line);
+    box-shadow: none;
+}
+
+/* ===== Подвал карточки (полоса под формой, если есть) ===== */
+.pf-v5-c-login__main-footer-band {
+    background: var(--kb-panelhead);
+    border-top: 1px solid var(--kb-line);
+    border-radius: 0 0 var(--kb-radius-lg) var(--kb-radius-lg);
+    color: var(--kb-muted);
+}

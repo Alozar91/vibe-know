@@ -95,6 +95,34 @@ API-документация — `http://localhost:8001/api/v1/docs`
 docker compose exec api python -c "from app.worker.tasks import keycloak_sync; keycloak_sync()"
 ```
 
+### 2.5. Login-тема Keycloak («kb»)
+
+Страницы входа/регистрации/сброса пароля оформлены в стиле системы
+(палитра `frontend/src/styles.css`: акцент `#0f62fe`, фон `#f7f8fa`,
+карточка с радиусом 12px, тёмная шапка `#16181d`, марка «БЗ»).
+Тема — `deploy/keycloak/themes/kb/login/` (родитель — встроенная
+`keycloak.v2`), монтируется в контейнер volume'ом
+`./keycloak/themes/kb:/opt/keycloak/themes/kb:ro`; включается в realm
+параметром `"loginTheme": "kb"` (realm JSON) вместе с локалью
+(`defaultLocale: ru`). Тёмная тема у SPA включается вручную — login-страницы
+всегда светлые (`darkMode=false`).
+
+Правки CSS подхватываются без рестарта (start-dev не кэширует темы;
+в prod-режиме `start --optimized` — рестарт keycloak). На **существующем**
+стенде realm-импорт пропускается — включение темы/локали через kcadm:
+
+```bash
+docker compose exec keycloak sh -c "cd /opt/keycloak && \
+  bin/kcadm.sh config credentials --server http://localhost:8080 \
+  --realm master --user <bootstrap-admin> --password <пароль> && \
+  bin/kcadm.sh update realms/kb -s loginTheme=kb \
+  -s internationalizationEnabled=true -s supportedLocales=[\"ru\"] -s defaultLocale=ru"
+```
+
+На сервере аналогично (локальный `.env` стенда может указывать на другой
+хост — `KC_HOSTNAME_URL` влияет только на issuer, не на адрес kcadm;
+exec выполняется внутри контейнера, `localhost` — сам Keycloak).
+
 ## 3. Мониторинг и алертинг (NFR-019)
 
 - Prometheus: `http://localhost:9090` — targets (`Status → Targets`), алерты

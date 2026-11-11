@@ -1,9 +1,13 @@
 {
   "realm": "kb",
   "enabled": true,
+  "loginTheme": "kb",
   "registrationAllowed": true,
   "loginWithEmailAllowed": true,
   "resetPasswordAllowed": true,
+  "internationalizationEnabled": true,
+  "supportedLocales": ["ru"],
+  "defaultLocale": "ru",
   "rememberMe": false,
   "verifyEmail": false,
   "sslRequired": "none",

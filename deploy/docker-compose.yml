@@ -101,6 +101,10 @@ services:
       KC_HOSTNAME_URL: ${KC_HOSTNAME_URL:-http://localhost:8080}
     volumes:
       - ./keycloak/realm-kb-test.json:/opt/keycloak/data/import/realm-kb-test.json:ro
+      # Кастомная login-тема «kb» (страницы входа/регистрации/сброса пароля в
+      # стиле системы): /opt/keycloak/themes читается без build/start-dev
+      # не кэширует темы — правки CSS подхватываются без рестарта контейнера.
+      - ./keycloak/themes/kb:/opt/keycloak/themes/kb:ro
     ports:
       - "8080:8080"
     healthcheck:

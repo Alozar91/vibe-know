@@ -81,7 +81,12 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const unread = useUnreadCount()
   const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
+  // q из URL — deep link на выдачу (/search?q=...): F5 сохраняет запрос.
+  // Нужен только читатель; навигацию из шапки делает navigate('/search?q=').
+  const [searchParams] = useSearchParams()
+  // Перемонтирование SearchView при повторном поиске из шапки ТЕМ ЖЕ словом:
+  // без ключа initialQuery у /search не изменится и поиск не перезапустится.
+  const [searchNonce, setSearchNonce] = useState(0)
 
   useEffect(() => { applyTheme(theme) }, [theme])
 
@@ -153,9 +158,14 @@ export default function App() {
     return <RolePicker onDone={afterRoleChoice} />
   }
 
-  // Поиск из шапки: q — параметр URL (deep link на выдачу)
+  // Поиск из шапки: переход на выдачу /search?q=... (deep link).
+  // setSearchParams тут нельзя: он меняет query ТЕКУЩЕГО маршрута (с главной
+  // вышло бы /?q=... — маршрут / параметр q игнорирует) — регресс реорганизации.
+  // searchNonce перемонтирует SearchView при повторном поиске тем же словом.
   function headerSearch(q: string) {
-    setSearchParams({ q })
+    navigate(`/search?q=${encodeURIComponent(q)}`)
+    setSearchNonce((n) => n + 1)
+    setSearchQ('') // очистить строку шапки после перехода
   }
 
   return (
@@ -215,7 +225,7 @@ export default function App() {
             <Route path="/" element={<MaterialsBrowser onOpenMaterial={(id) => navigate(`/materials/${id}`)} refreshToken={refreshToken} isSuper={!!me?.is_super} />} />
             <Route path="/materials/:id" element={<MaterialPage onSaved={() => setRefreshToken((x) => x + 1)} />} />
             <Route path="/sections" element={<Sections onOpenMaterial={(id) => navigate(`/materials/${id}`)} refreshToken={refreshToken} />} />
-            <Route path="/search" element={<SearchView initialQuery={searchParams.get('q') ?? ''} onOpenMaterial={(id) => navigate(`/materials/${id}`)} />} />
+            <Route path="/search" element={<SearchView key={searchNonce} initialQuery={searchParams.get('q') ?? ''} onOpenMaterial={(id) => navigate(`/materials/${id}`)} />} />
             <Route path="/matrix" element={<TransitionMatrix />} />
             <Route path="/analytics" element={<SearchAnalytics />} />
             <Route path="/triggers" element={<NotificationTriggers />} />

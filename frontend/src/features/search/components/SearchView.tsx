@@ -2,7 +2,15 @@
 // фильтры (FR-115/116), сортировка (FR-117), подсветка (FR-118), пагинация.
 // Открытие материала из выдачи → POST /search-opens (§7.6, fire-and-forget).
 // Реорганизация frontend: запрос — через src/api/search.
-import { useState } from 'react'
+// Запуск поиска (два пути):
+//   авто — initialQuery пришёл извне: шапка → navigate('/search?q=…'),
+//          deep link F5; при повторном поиске из шапки ТЕМ ЖЕ словом App
+//          перемонтирует SearchView ключом (searchNonce) → effect отработает;
+//   ручной — Enter/«Найти»/смена фильтра/пагинация → setTick(t => t + 1).
+// Эффект по tick исполняет runRef.current (latest-ref): к моменту эффекта все
+// setState обработчика закоммичены (строка/фильтры/page уже новые) — замыкание
+// не stale (без ref «Найти» с 3-й страницы искал бы на 3-й странице).
+import { useEffect, useRef, useState } from 'react'
 import { postSearchOpen, search } from '../../../api/search'
 import { errText, fmtDate, STATUS_RU } from '../../../shared/lib/dicts'
 import { Empty, Err, Pager, StatusBadge } from '../../../shared/ui/index'
@@ -41,6 +49,33 @@ export default function SearchView({ onOpenMaterial, initialQuery }: Props) {
       setBusy(false)
     }
   }
+
+  // latest-ref: эффект по tick всегда вызывает свежий run; писать в ref во время
+  // рендера нельзя (react-hooks/refs) — пишем в useEffect после каждого рендера.
+  const runRef = useRef<() => void>(() => undefined)
+  useEffect(() => {
+    runRef.current = run
+  })
+  // Исполнитель: любой запуск поиска — это +1 к тику.
+  const [tick, setTick] = useState(initialQuery.trim() ? 1 : 0)
+  useEffect(() => {
+    if (tick === 0) return
+    void runRef.current()
+  }, [tick])
+
+  // Авто-поиск по внешнему запросу (шапка/deep link): initialQuery изменился
+  // и не пуст → заполнить строку, сбросить страницу и искать. Первичный запуск
+  // при монтировании с ?q= делает начальный tick=1 (эффект ниже пропустит
+  // initialQuery === lastExternal — поиск не задвоится).
+  const [lastExternal, setLastExternal] = useState(initialQuery)
+  useEffect(() => {
+    if (!initialQuery.trim() || initialQuery === lastExternal) return
+    setLastExternal(initialQuery)
+    setQ(initialQuery)
+    setPage(1)
+    setTick((t) => t + 1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialQuery])
 
   // §7.6: открытие из выдачи → событие открытия (fire-and-forget)
   const openMaterial = (id: string) => {
@@ -83,11 +118,11 @@ export default function SearchView({ onOpenMaterial, initialQuery }: Props) {
             onChange={(e) => setQ(e.target.value)}
             placeholder="Поисковый запрос (фраза — в кавычках, FR-113)"
             style={{ width: 420, maxWidth: '100%' }}
-            onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); void run() } }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); setTick((t) => t + 1) } }}
           />
-          <button className="btn primary" onClick={() => { setPage(1); void run() }} disabled={busy}>Найти</button>
+          <button className="btn primary" onClick={() => { setPage(1); setTick((t) => t + 1) }} disabled={busy}>Найти</button>
           <label className="srchfld">Режим:
-            <select value={searchType} onChange={(e) => { setSearchType(e.target.value as 'fulltext' | 'vector' | 'hybrid'); setPage(1) }}>
+            <select value={searchType} onChange={(e) => { setSearchType(e.target.value as 'fulltext' | 'vector' | 'hybrid'); setPage(1); setTick((t) => t + 1) }}>
               <option value="fulltext">полнотекстовый</option>
               <option value="vector">векторный (RAG)</option>
               <option value="hybrid">гибридный (RRF)</option>
@@ -95,7 +130,7 @@ export default function SearchView({ onOpenMaterial, initialQuery }: Props) {
           </label>
           <label className="checkrow">
             <input type="checkbox" checked={partial}
-                   onChange={(e) => { setPartial(e.target.checked); setPage(1) }} />
+                   onChange={(e) => { setPartial(e.target.checked); setPage(1); setTick((t) => t + 1) }} />
             Частичное совпадение (FR-114)
           </label>
           <span className="spacer" />
@@ -103,17 +138,17 @@ export default function SearchView({ onOpenMaterial, initialQuery }: Props) {
         </div>
         <div className="toolbar">
           <label className="srchfld">Статус:
-            <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1) }}>
+            <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); setTick((t) => t + 1) }}>
               <option value="">любой</option>
               {Object.entries(STATUS_RU).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
             </select>
           </label>
           <label className="srchfld">Архив:
             <input type="checkbox" checked={includeArchive}
-                   onChange={(e) => { setIncludeArchive(e.target.checked); setPage(1) }} />
+                   onChange={(e) => { setIncludeArchive(e.target.checked); setPage(1); setTick((t) => t + 1) }} />
           </label>
           <label className="srchfld">Связи:
-            <select value={masterFilter} onChange={(e) => { setMasterFilter(e.target.value); setPage(1) }}>
+            <select value={masterFilter} onChange={(e) => { setMasterFilter(e.target.value); setPage(1); setTick((t) => t + 1) }}>
               <option value="">все</option>
               <option value="masters">только мастер-материалы</option>
               <option value="children">только подчинённые</option>
@@ -122,14 +157,14 @@ export default function SearchView({ onOpenMaterial, initialQuery }: Props) {
           {searchType === 'fulltext' && (
             <>
               <label className="srchfld">Сортировка:
-                <select value={sort} onChange={(e) => { setSort(e.target.value); setPage(1) }}>
+                <select value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); setTick((t) => t + 1) }}>
                   <option value="relevance">релевантность</option>
                   <option value="name">название</option>
                   <option value="updated_at">дата изменения</option>
                   <option value="published_at">дата публикации</option>
                 </select>
               </label>
-              <button className="pg" onClick={() => setOrder(order === 'asc' ? 'desc' : 'asc')}>
+              <button className="pg" onClick={() => { setOrder(order === 'asc' ? 'desc' : 'asc'); setTick((t) => t + 1) }}>
                 {order === 'asc' ? '↑' : '↓'}
               </button>
             </>
@@ -181,8 +216,8 @@ export default function SearchView({ onOpenMaterial, initialQuery }: Props) {
               <Pager
                 page={page}
                 pages={pages}
-                onPrev={() => canPrev && setPage(page - 1)}
-                onNext={() => canNext && setPage(page + 1)}
+                onPrev={() => { if (canPrev) { setPage(page - 1); setTick((t) => t + 1) } }}
+                onNext={() => { if (canNext) { setPage(page + 1); setTick((t) => t + 1) } }}
               />
             )}
           </div>

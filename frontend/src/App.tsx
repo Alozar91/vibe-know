@@ -2,43 +2,47 @@
 // Этап 4: вход (US-001), дерево групп + списки (US-005), разделы (US-006),
 // карточка материала (US-037/031), снапшоты прав (US-044, СА).
 // modern-ui: каркас шапка+сайдбар, темы light/dark (переключатель в шапке).
+//
+// Реорганизация frontend: навигация — react-router (deep links: F5 сохраняет
+// экран, карточка материала открывается по URL /materials/:id); маршруты:
+//   /                 — материалы (браузер групп, US-005)
+//   /materials/:id    — карточка материала (US-037) + права (US-044)
+//   /sections         — разделы (US-006)
+//   /search?q=        — поиск (US-034–036)
+//   /matrix | /analytics | /triggers | /audit | /settings | /service | /rag — СА
 import { useEffect, useState } from 'react'
-import { completeLogin, getAccessToken, isAuthenticated, login, logout, api, register } from './auth'
-import MaterialsBrowser from './MaterialsBrowser'
-import MaterialCardView from './MaterialCard'
-import Sections from './Sections'
-import PermissionsEditor from './PermissionsEditor'
-import TransitionMatrix from './TransitionMatrix'
-import SearchView from './SearchView'
-import SearchAnalytics from './SearchAnalytics'
-import NotificationBell, { useUnreadCount } from './NotificationBell'
-import NotificationTriggers from './NotificationTriggers'
-import AuditLog from './AuditLog'
-import SystemSettings from './SystemSettings'
-import ServiceDesk from './ServiceDesk'
-import RagAdmin from './RagAdmin'
-import { applyTheme, loadTheme, type Theme } from './theme'
+import { NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { completeLogin, getAccessToken, isAuthenticated, login, logout, register } from './shared/auth/auth'
+import { api } from './api/client'
+import MaterialsBrowser from './features/materials/components/MaterialsBrowser'
+import MaterialCardView from './features/materials/components/MaterialCardView'
+import Sections from './features/materials/components/Sections'
+import PermissionsEditor from './features/admin/components/PermissionsEditor'
+import TransitionMatrix from './features/admin/components/TransitionMatrix'
+import SearchView from './features/search/components/SearchView'
+import SearchAnalytics from './features/search/components/SearchAnalytics'
+import NotificationBell, { useUnreadCount } from './features/notifications/components/NotificationBell'
+import NotificationTriggers from './features/admin/components/NotificationTriggers'
+import AuditLog from './features/admin/components/AuditLog'
+import SystemSettings from './features/admin/components/SystemSettings'
+import ServiceDesk from './features/admin/components/ServiceDesk'
+import RagAdmin from './features/admin/components/RagAdmin'
+import RolePicker from './features/auth/components/RolePicker'
+import { applyTheme, loadTheme, type Theme } from './shared/theme/theme'
 import './styles.css'
 
-type View = { kind: 'browser' } | { kind: 'sections' } | { kind: 'matrix' } | { kind: 'search'; q: string } | { kind: 'analytics' } | { kind: 'material'; id: string } | { kind: 'triggers' } | { kind: 'audit' } | { kind: 'settings' } | { kind: 'service' } | { kind: 'rag' }
-
-// Оффер тестовой регистрации (НЕ для продуктива): состояние + допустимые роли
-interface TestOffer {
-  enabled: boolean
-  available: boolean
-  roles: { id: string; name: string }[]
-}
+// Оффер тестовой регистрации — в features/auth/components/RolePicker.tsx
 
 const NAV = [
-  { kind: 'browser', label: 'Материалы', icon: '📦', superOnly: false },
-  { kind: 'sections', label: 'Разделы', icon: '🗂️', superOnly: false },
-  { kind: 'matrix', label: 'Матрица переходов', icon: '🔀', superOnly: true },
-  { kind: 'analytics', label: 'Аналитика поиска', icon: '📈', superOnly: true },
-  { kind: 'triggers', label: 'Настройка уведомлений', icon: '🔔', superOnly: true },
-  { kind: 'audit', label: 'Журнал аудита', icon: '🛡️', superOnly: true },
-  { kind: 'settings', label: 'Параметры системы', icon: '⚙️', superOnly: true },
-  { kind: 'service', label: 'Служебный раздел', icon: '🧰', superOnly: true },
-  { kind: 'rag', label: 'RAG — векторный поиск', icon: '🧠', superOnly: true },
+  { path: '/', label: 'Материалы', icon: '📦', superOnly: false },
+  { path: '/sections', label: 'Разделы', icon: '🗂️', superOnly: false },
+  { path: '/matrix', label: 'Матрица переходов', icon: '🔀', superOnly: true },
+  { path: '/analytics', label: 'Аналитика поиска', icon: '📈', superOnly: true },
+  { path: '/triggers', label: 'Настройка уведомлений', icon: '🔔', superOnly: true },
+  { path: '/audit', label: 'Журнал аудита', icon: '🛡️', superOnly: true },
+  { path: '/settings', label: 'Параметры системы', icon: '⚙️', superOnly: true },
+  { path: '/service', label: 'Служебный раздел', icon: '🧰', superOnly: true },
+  { path: '/rag', label: 'RAG — векторный поиск', icon: '🧠', superOnly: true },
 ] as const
 
 // Инициалы для аватара: «Иван Иванов» → «ИИ»
@@ -48,125 +52,45 @@ function initials(name?: string): string {
   return parts.slice(0, 2).map((x) => x[0]?.toUpperCase() ?? '').join('')
 }
 
-// Экран выбора роли тестовой регистрации (одноразовый, после первого входа).
-// Показывается, только когда флаг включён и ролей у пользователя ещё нет.
-function RolePicker({ onDone }: { onDone: (dismiss?: boolean) => void }) {
-  const [offer, setOffer] = useState<TestOffer | null>(null)
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState('')
-
-  useEffect(() => {
-    api<TestOffer>('/me/test-registration')
-      .then(setOffer)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-  }, [])
-
-  async function choose(roleId: string) {
-    setError('')
-    setBusy(roleId)
-    try {
-      await api('/me/test-registration', { method: 'POST', body: JSON.stringify({ role_id: roleId }) })
-      onDone()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-      setBusy('')
-    }
-  }
-
-  if (error) {
-    return (
-      <div className="rolepick">
-        <div className="box">
-          <div className="logo mark">БЗ</div>
-          <h2>Не удалось загрузить выбор роли</h2>
-          <p className="note">{error}</p>
-          <button className="btn primary" onClick={() => onDone(true)}>Продолжить без выбора</button>
-        </div>
-      </div>
-    )
-  }
-  if (!offer) {
-    return <div className="rolepick"><div className="box"><p className="spin">Загрузка…</p></div></div>
-  }
-  if (!offer.available) {
-    // Два разных случая: роль уже есть (флаг включён) или флаг выключен —
-    // иначе «Роль уже назначена» вводит в заблуждение на стенде без флага.
-    const enabled = offer.enabled
-    return (
-      <div className="rolepick">
-        <div className="box">
-          <div className="logo mark">БЗ</div>
-          <h2>{enabled ? 'Роль уже назначена' : 'Тестовая регистрация отключена'}</h2>
-          <p className="note">
-            {enabled
-              ? 'Выбор роли доступен один раз; смену роли выполняет системный администратор.'
-              : 'Выбор роли на этом стенде не включён (флаг KB_TEST_REGISTRATION в deploy/.env). Роль назначит системный администратор, либо включите флаг и перезапустите api.'}
-          </p>
-          <button className="btn primary" onClick={() => onDone(true)}>Продолжить</button>
-        </div>
-      </div>
-    )
-  }
+// Страница карточки: /materials/:id + права (US-044). Компонент-обёртка,
+// чтобы useParams был рядом с маршрутом.
+function MaterialPage({ onSaved }: { onSaved: () => void }) {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  if (!id) return null
   return (
-    <div className="rolepick">
-      <div className="box wide">
-        <div className="logo mark">БЗ</div>
-        <h2>Выберите роль для тестирования</h2>
-        <p className="note">
-          Тестовый режим: роль определяет права в системе. Выбор одноразовый —
-          потом роль может поменять только системный администратор.
-        </p>
-        {error && <div className="alert err">{error}</div>}
-        <div className="rp-grid">
-          {offer.roles.map((r) => (
-            <button
-              key={r.id}
-              className="rp-card"
-              disabled={!!busy}
-              onClick={() => choose(r.id)}
-            >
-              <div className="rp-name">{r.name}</div>
-              <div className="rp-desc">{ROLE_HINTS[r.name] ?? 'Просмотр материалов'}</div>
-              <div className="rp-go">{busy === r.id ? 'Назначение…' : 'Выбрать →'}</div>
-            </button>
-          ))}
-        </div>
-        <button className="btn ghost small rp-later" onClick={() => onDone(true)}>Пока не выбирать</button>
-        <a className="rp-escape" href="" onClick={(e) => { e.preventDefault(); register().catch(console.error) }}>
-          Зарегистрировать нового пользователя (тест)
-        </a>
-      </div>
-    </div>
+    <>
+      <MaterialCardView
+        materialId={id}
+        onSaved={onSaved}
+        onClosed={() => navigate(-1)}
+        onOpenCard={(mid) => navigate(`/materials/${mid}`)}
+      />
+      {/* US-044: управление правами — только СА (FR-105); компонент сам получит 403 у не-СА */}
+      <PermissionsEditor objectType="material" objectId={id} />
+    </>
   )
-}
-
-// Подсказки по ролям (сид LLD §2.6; для клонов — общий текст)
-const ROLE_HINTS: Record<string, string> = {
-  'Читатель': 'Просмотр опубликованных материалов',
-  'Автор': 'Создание и редактирование своих материалов',
-  'Рецензент': 'Проверка материалов на проверке',
-  'Публикатор': 'Публикация и архивация материалов',
-  'Системный администратор': 'Полный доступ к системе (стенд: вы сами себе СА)',
 }
 
 export default function App() {
   const [ready, setReady] = useState(false)
   const [authed, setAuthed] = useState(false)
-  const [view, setView] = useState<View>({ kind: 'browser' })
   const [refreshToken, setRefreshToken] = useState(0)
   const [me, setMe] = useState<{ id?: string; display_name?: string; is_super?: boolean; roles?: string[] } | null>(null)
   const [searchQ, setSearchQ] = useState('')
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const unread = useUnreadCount()
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   useEffect(() => { applyTheme(theme) }, [theme])
 
-  // Колокольчик: «открыть материал» из ленты уведомлений
+  // Колокольчик: «открыть материал» из ленты уведомлений → deep link
   useEffect(() => {
-    const h = (e: Event) => setView({ kind: 'material', id: (e as CustomEvent).detail as string })
+    const h = (e: Event) => navigate(`/materials/${(e as CustomEvent).detail as string}`)
     window.addEventListener('kb:open-material', h)
     return () => window.removeEventListener('kb:open-material', h)
-  }, [])
+  }, [navigate])
 
   useEffect(() => {
     (async () => {
@@ -229,6 +153,11 @@ export default function App() {
     return <RolePicker onDone={afterRoleChoice} />
   }
 
+  // Поиск из шапки: q — параметр URL (deep link на выдачу)
+  function headerSearch(q: string) {
+    setSearchParams({ q })
+  }
+
   return (
     <>
       <header className="topbar">
@@ -240,7 +169,7 @@ export default function App() {
             value={searchQ}
             onChange={(e) => setSearchQ(e.target.value)}
             placeholder="Поиск по материалам… (Enter)"
-            onKeyDown={(e) => { if (e.key === 'Enter') setView({ kind: 'search', q: searchQ }) }}
+            onKeyDown={(e) => { if (e.key === 'Enter') headerSearch(searchQ) }}
           />
         </div>
         <div className="spacer" />
@@ -269,48 +198,33 @@ export default function App() {
           <h4>Разделы</h4>
           <nav className="nav">
             {NAV.filter((n) => !n.superOnly || me?.is_super).map((n) => (
-              <button
-                key={n.kind}
-                className={`navi ${view.kind === n.kind ? 'on' : ''}`}
-                onClick={() => setView({ kind: n.kind } as View)}
+              <NavLink
+                key={n.path}
+                to={n.path}
+                end={n.path === '/'}
+                className={({ isActive }) => `navi ${isActive ? 'on' : ''}`}
               >
                 <span className="ni">{n.icon}</span> {n.label}
-              </button>
+              </NavLink>
             ))}
           </nav>
         </aside>
 
         <main className="content">
-          {view.kind === 'browser' && (
-            <MaterialsBrowser onOpenMaterial={(id) => setView({ kind: 'material', id })} refreshToken={refreshToken} isSuper={!!me?.is_super} />
-          )}
-          {view.kind === 'sections' && (
-            <Sections onOpenMaterial={(id) => setView({ kind: 'material', id })} refreshToken={refreshToken} />
-          )}
-          {view.kind === 'matrix' && <TransitionMatrix />}
-          {view.kind === 'analytics' && <SearchAnalytics />}
-          {view.kind === 'triggers' && <NotificationTriggers />}
-          {view.kind === 'audit' && <AuditLog />}
-          {view.kind === 'settings' && <SystemSettings />}
-          {view.kind === 'service' && <ServiceDesk />}
-          {view.kind === 'rag' && (
-            <RagAdmin onOpenMaterial={(id) => setView({ kind: 'material', id })} />
-          )}
-          {view.kind === 'search' && (
-            <SearchView initialQuery={view.q} onOpenMaterial={(id) => setView({ kind: 'material', id })} />
-          )}
-          {view.kind === 'material' && (
-            <>
-              <MaterialCardView
-                materialId={view.id}
-                onSaved={() => setRefreshToken((x) => x + 1)}
-                onClosed={() => setView({ kind: 'browser' })}
-                onOpenCard={(id) => setView({ kind: 'material', id })}
-              />
-              {/* US-044: управление правами — только СА (FR-105); компонент сам получит 403 у не-СА */}
-              <PermissionsEditor objectType="material" objectId={view.id} />
-            </>
-          )}
+          <Routes>
+            <Route path="/" element={<MaterialsBrowser onOpenMaterial={(id) => navigate(`/materials/${id}`)} refreshToken={refreshToken} isSuper={!!me?.is_super} />} />
+            <Route path="/materials/:id" element={<MaterialPage onSaved={() => setRefreshToken((x) => x + 1)} />} />
+            <Route path="/sections" element={<Sections onOpenMaterial={(id) => navigate(`/materials/${id}`)} refreshToken={refreshToken} />} />
+            <Route path="/search" element={<SearchView initialQuery={searchParams.get('q') ?? ''} onOpenMaterial={(id) => navigate(`/materials/${id}`)} />} />
+            <Route path="/matrix" element={<TransitionMatrix />} />
+            <Route path="/analytics" element={<SearchAnalytics />} />
+            <Route path="/triggers" element={<NotificationTriggers />} />
+            <Route path="/audit" element={<AuditLog />} />
+            <Route path="/settings" element={<SystemSettings />} />
+            <Route path="/service" element={<ServiceDesk />} />
+            <Route path="/rag" element={<RagAdmin onOpenMaterial={(id) => navigate(`/materials/${id}`)} />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
         </main>
       </div>
     </>

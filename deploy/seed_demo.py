@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import urllib.error
@@ -30,7 +31,7 @@ from pathlib import Path
 
 DEPLOY = Path(__file__).resolve().parent
 ENV_PATH = DEPLOY / ".env"
-KC = "http://localhost:8080/realms/kb/protocol/openid-connect/token"
+KC = f"http://localhost:{os.environ.get('KC_HOST_PORT', '8080')}/realms/kb/protocol/openid-connect/token"
 API = "http://localhost:8001/api/v1"
 CHECK = "--check" in sys.argv
 
